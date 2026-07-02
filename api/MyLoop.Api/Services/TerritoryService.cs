@@ -1116,6 +1116,11 @@ public class TerritoryService : ITerritoryService
     /// Caller passes client's local date (clamped to UTC ±1 day) so users near
     /// timezone boundaries don't lose streaks. First-ever claim seeds streak=1
     /// without resetting an existing streak that was set elsewhere.
+    ///
+    /// Pairs with the background reaper <c>DecayCleanupService.BreakStaleStreaksAsync</c>: because
+    /// this records LastClaimDate in the player's LOCAL frame (clamped to UTC ±1), the UTC-only
+    /// reaper must allow a matching grace (<see cref="GameConstants.StreakBreakUtcGraceDays"/>) so
+    /// it never breaks a streak this method still considers alive.
     /// </summary>
     private static void UpdateStreak(User user, DateOnly today)
     {
