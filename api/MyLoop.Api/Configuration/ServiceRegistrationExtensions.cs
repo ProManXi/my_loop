@@ -24,7 +24,7 @@ public static class ServiceRegistrationExtensions
                     maxRetryDelay: TimeSpan.FromSeconds(InfrastructureDefaults.DbMaxRetryDelaySeconds),
                     errorCodesToAdd: null)));
 
-    /// <summary>Registers domain services, identity resolution, the geocoding client, and the decay worker.</summary>
+    /// <summary>Registers domain services, identity resolution, the geocoding client, the decay worker, and the HexCount reconciliation worker.</summary>
     public static IServiceCollection AddMyLoopServices(this IServiceCollection services)
     {
         services.AddScoped<IValidationService, ValidationService>();
@@ -46,6 +46,8 @@ public static class ServiceRegistrationExtensions
         services.AddHttpClient<GeocodingService>(c =>
             c.Timeout = TimeSpan.FromSeconds(InfrastructureDefaults.GeocodingTimeoutSeconds));
         services.AddHostedService<DecayCleanupService>();
+        // Backstop that repairs any HexCount drift back to the true owned-cell count.
+        services.AddHostedService<HexCountReconciliationService>();
 
         services.AddHttpContextAccessor();
         services.AddMemoryCache();
