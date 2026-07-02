@@ -5,10 +5,11 @@ using MyLoop.Api.Interfaces;
 namespace MyLoop.Api.Controllers;
 
 /// <summary>
-/// Handles territory queries — viewport cells, stats, stolen cells, history.
+/// Handles territory queries — viewport cells, per-user territories, stolen cells,
+/// claim history, and exploration progress.
 /// Endpoints that expose a player's PRIVATE data (stolen cells, walk history,
 /// exploration progress) are restricted to the authenticated owner. Public map
-/// and public-profile data remain readable by any authenticated user.
+/// data remains readable by any authenticated user.
 /// </summary>
 [ApiController]
 [Route("api/territories")]
@@ -42,16 +43,6 @@ public class TerritoryController : ControllerBase
     }
 
     /// <summary>
-    /// Get a user's total territory stats (cell count + area). Shown on public profiles.
-    /// </summary>
-    [HttpGet("stats/{userId:guid}")]
-    public async Task<IActionResult> GetStats([FromRoute] Guid userId)
-    {
-        var stats = await _territoryService.GetUserStats(userId);
-        return Ok(stats);
-    }
-
-    /// <summary>
     /// Get hexes that were stolen from this user within N days (private — revenge list).
     /// </summary>
     [HttpGet("stolen/{userId:guid}")]
@@ -62,16 +53,6 @@ public class TerritoryController : ControllerBase
         if (await DenySelf(userId) is { } deny) return deny;
 
         var result = await _territoryService.GetStolenCells(userId, days);
-        return Ok(result);
-    }
-
-    /// <summary>
-    /// Get the full ownership history of a specific hex cell (public map data).
-    /// </summary>
-    [HttpGet("history/{cellId:long}")]
-    public async Task<IActionResult> GetCellHistory([FromRoute] long cellId)
-    {
-        var result = await _territoryService.GetCellHistory(cellId);
         return Ok(result);
     }
 
