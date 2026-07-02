@@ -118,6 +118,13 @@ public static class GameConstants
     public const int MaxDisplayNameLength = 20;
     public const int MaxAvatarId = 50;
 
+    /// <summary>
+    /// Minimum days between home-location changes. Home drives decay distance and the
+    /// city/country leaderboard scope, so unrestricted re-homing lets a player game both
+    /// (anti-cheat, #84). The first set (onboarding) is always allowed.
+    /// </summary>
+    public const int HomeChangeCooldownDays = 30;
+
     // --- XP & Levels ---
     public const int XpPerHexCaptured = 10;
     public const int XpPerHexStolen = 25;
