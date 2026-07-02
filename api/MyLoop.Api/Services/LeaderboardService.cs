@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 using MyLoop.Api.Constants;
 using MyLoop.Api.Data;
 using MyLoop.Api.Entities;
@@ -8,6 +9,9 @@ namespace MyLoop.Api.Services;
 
 public class LeaderboardService : ILeaderboardService
 {
+    /// <summary>Postgres advisory-lock key serializing RefreshLeaderboard runs.</summary>
+    private const long LeaderboardRefreshLockKey = 0x4C4442524546; // "LDBREF"
+
     private readonly AppDbContext _db;
     private readonly IHexGridService _hexGrid;
 
@@ -50,6 +54,21 @@ public class LeaderboardService : ILeaderboardService
             _db.ChangeTracker.Clear();
             await using var transaction = await _db.Database.BeginTransactionAsync();
 
+            // Serialize concurrent refreshes (the hourly run and a claim-triggered run can
+            // overlap): the loser waits, then observes the winner's committed rows, keeping
+            // the finish counters once-per-day and preventing the delete/re-insert pair from
+            // colliding on the (UserId, Date) unique index. Same advisory-lock pattern as
+            // TerritoryService claims.
+            await _db.Database.ExecuteSqlRawAsync(
+                "SELECT pg_advisory_xact_lock({0})", LeaderboardRefreshLockKey);
+
+            // Users already ranked today were credited a "finish" by an earlier refresh —
+            // captured before the delete below wipes today's rows (#83).
+            var alreadyCountedToday = (await _db.LeaderboardEntries
+                .Where(l => l.Date == today)
+                .Select(l => l.UserId)
+                .ToListAsync()).ToHashSet();
+
             await _db.LeaderboardEntries.Where(l => l.Date == today).ExecuteDeleteAsync();
 
             var rankings = await _db.TerritoryCells
@@ -71,7 +90,7 @@ public class LeaderboardService : ILeaderboardService
             _db.LeaderboardEntries.AddRange(entries);
             await _db.SaveChangesAsync();
 
-            await UpdateAchievementCounters(entries);
+            await UpdateAchievementCounters(entries, alreadyCountedToday);
             await PurgeOldEntries(today);
 
             await _db.SaveChangesAsync();
@@ -167,18 +186,34 @@ public class LeaderboardService : ILeaderboardService
         };
     }
 
-    private async Task UpdateAchievementCounters(List<LeaderboardEntry> entries)
+    /// <summary>
+    /// Credits top-N finish counters at most once per calendar day per user: only users
+    /// gaining their first LeaderboardEntry of the day are counted (#83). Set-based
+    /// ExecuteUpdate per rank threshold replaces the former per-user FindAsync loop (N+1);
+    /// it runs inside the refresh transaction, so a retry rolls back and re-runs cleanly.
+    /// </summary>
+    private async Task UpdateAchievementCounters(
+        List<LeaderboardEntry> entries, HashSet<Guid> alreadyCountedToday)
     {
-        foreach (var entry in entries)
-        {
-            var user = await _db.Users.FindAsync(entry.UserId);
-            if (user == null) continue;
+        var newlyRanked = entries.Where(e => !alreadyCountedToday.Contains(e.UserId)).ToList();
 
-            if (entry.Rank <= 3) user.TopThreeFinishes++;
-            if (entry.Rank <= 10) user.TopTenFinishes++;
-            if (entry.Rank <= 100) user.TopHundredFinishes++;
-            if (entry.Rank <= 1000) user.TopThousandFinishes++;
-        }
+        await IncrementFinishes(newlyRanked, 3,
+            s => s.SetProperty(u => u.TopThreeFinishes, u => u.TopThreeFinishes + 1));
+        await IncrementFinishes(newlyRanked, 10,
+            s => s.SetProperty(u => u.TopTenFinishes, u => u.TopTenFinishes + 1));
+        await IncrementFinishes(newlyRanked, 100,
+            s => s.SetProperty(u => u.TopHundredFinishes, u => u.TopHundredFinishes + 1));
+        await IncrementFinishes(newlyRanked, 1000,
+            s => s.SetProperty(u => u.TopThousandFinishes, u => u.TopThousandFinishes + 1));
+    }
+
+    private async Task IncrementFinishes(
+        List<LeaderboardEntry> newlyRanked, int maxRank,
+        Action<UpdateSettersBuilder<User>> increment)
+    {
+        var userIds = newlyRanked.Where(e => e.Rank <= maxRank).Select(e => e.UserId).ToList();
+        if (userIds.Count == 0) return;
+        await _db.Users.Where(u => userIds.Contains(u.Id)).ExecuteUpdateAsync(increment);
     }
 
     private async Task PurgeOldEntries(DateOnly today)
