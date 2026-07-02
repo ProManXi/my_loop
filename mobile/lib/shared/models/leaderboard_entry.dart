@@ -7,8 +7,14 @@ library;
 
 /// A single entry in the local or global leaderboard.
 ///
-/// Contains everything needed to render one player's row in the
-/// leaderboard UI: identity, rank position, and territory metrics.
+/// The leaderboard is a periodic SNAPSHOT (rebuilt by the backend's
+/// `RefreshLeaderboard`), so every field here is a snapshot value taken at that
+/// moment: [cellCount] / [areaM2] / [rank]. It deliberately does NOT carry the
+/// player's live `User.HexCount`: mixing a live counter with the snapshot count
+/// and rank made a row's tier badge disagree with its shown count between
+/// refreshes (see bug-2026-07-02-leaderboard-tier-uses-live-hexcount-vs-snapshot-cellcount).
+/// The backend still sends `userHexCount`/`userStreak`/`userDistanceKm`; they are
+/// intentionally ignored so no display can source a hex quantity other than [cellCount].
 class LeaderboardEntry {
   final String userId;
   final String displayName;
@@ -17,9 +23,6 @@ class LeaderboardEntry {
   final int cellCount;
   final double areaM2;
   final int rank;
-  final int hexCount;
-  final int streak;
-  final double distanceKm;
 
   const LeaderboardEntry({
     required this.userId,
@@ -29,9 +32,6 @@ class LeaderboardEntry {
     required this.cellCount,
     required this.areaM2,
     required this.rank,
-    this.hexCount = 0,
-    this.streak = 0,
-    this.distanceKm = 0,
   });
 
   /// Deserializes a leaderboard entry from a JSON map returned by the API.
@@ -44,9 +44,6 @@ class LeaderboardEntry {
       cellCount: (json['cellCount'] as num).toInt(),
       areaM2: (json['areaM2'] as num).toDouble(),
       rank: (json['rank'] as num).toInt(),
-      hexCount: (json['userHexCount'] as num?)?.toInt() ?? 0,
-      streak: (json['userStreak'] as num?)?.toInt() ?? 0,
-      distanceKm: (json['userDistanceKm'] as num?)?.toDouble() ?? 0,
     );
   }
 }
