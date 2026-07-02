@@ -55,7 +55,7 @@ public class ClaimsController : ControllerBase
         try
         {
             var result = await _territoryService.ProcessClaim(
-                callerId.Value, request.Path, ParseWalkSessionId(request.WalkSessionId));
+                callerId.Value, request.Path, ParseWalkSessionId(request.WalkSessionId), request.LocalDate);
 
             if (!result.Success)
                 return BadRequest(new { error = result.Error });

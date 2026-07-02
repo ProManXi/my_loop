@@ -7,8 +7,10 @@ namespace MyLoop.Api.Services;
 
 public interface IMissionService
 {
-    Task<List<DailyMission>> GetTodaysMissions(Guid userId);
-    Task<MissionProgressResult> RecordProgress(Guid userId, MissionType type, int amount);
+    /// <param name="gameDay">The player's local day (see <see cref="GameDay"/>). Null falls back to
+    /// UTC today for callers that don't supply one.</param>
+    Task<List<DailyMission>> GetTodaysMissions(Guid userId, DateOnly? gameDay = null);
+    Task<MissionProgressResult> RecordProgress(Guid userId, MissionType type, int amount, DateOnly? gameDay = null);
     Task<XpGainResult> AwardXp(Guid userId, int xp, string reason);
 }
 
@@ -45,9 +47,9 @@ public class MissionService : IMissionService
         _db = db;
     }
 
-    public async Task<List<DailyMission>> GetTodaysMissions(Guid userId)
+    public async Task<List<DailyMission>> GetTodaysMissions(Guid userId, DateOnly? gameDay = null)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = gameDay ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
         var missions = await _db.DailyMissions
             .Where(m => m.UserId == userId && m.Date == today)
@@ -80,9 +82,9 @@ public class MissionService : IMissionService
     /// Records progress toward missions. Does NOT call SaveChangesAsync —
     /// the caller is responsible for saving (allows single-transaction batching).
     /// </summary>
-    public async Task<MissionProgressResult> RecordProgress(Guid userId, MissionType type, int amount)
+    public async Task<MissionProgressResult> RecordProgress(Guid userId, MissionType type, int amount, DateOnly? gameDay = null)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = gameDay ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var missions = await _db.DailyMissions
             .Where(m => m.UserId == userId && m.Date == today)
             .ToListAsync();

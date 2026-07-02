@@ -23,6 +23,7 @@ import 'package:myloop/shared/services/batch_drain_service.dart';
 import 'package:myloop/shared/services/mock/mock_walk_config.dart';
 import 'package:myloop/shared/services/step_claim_queue.dart';
 import 'package:myloop/shared/services/trace_context.dart';
+import 'package:myloop/shared/util/local_day.dart';
 
 final _log = Logger('API');
 
@@ -241,6 +242,8 @@ class ApiService {
       // Shared with this walk's batch-step claims so the server folds them into one
       // Claim instead of adding a separate loop-claim row (#56).
       'walkSessionId': walkSessionId,
+      // Local day so this loop claim progresses the player's "today" missions.
+      'localDate': localGameDay(),
     });
     return response.data as Map<String, dynamic>;
   }
@@ -334,7 +337,12 @@ class ApiService {
   /// achievements, exploration, rank. Single network round-trip.
   Future<Map<String, dynamic>?> getGameState(String userId) async {
     try {
-      final response = await _dio.get('/api/users/$userId/game-state');
+      // Send the device local day so the missions in the game-state payload resolve to the
+      // player's "today" (consistent with getDailyMissions and the claim paths).
+      final response = await _dio.get(
+        '/api/users/$userId/game-state',
+        queryParameters: {'localDate': localGameDay()},
+      );
       return response.data as Map<String, dynamic>;
     } catch (e) {
       _log.warning('getGameState failed', e);
@@ -433,7 +441,11 @@ class ApiService {
 
   /// Get today's daily missions for the user (generates if needed).
   Future<List<DailyMission>> getDailyMissions(String userId) async {
-    final response = await _dio.get('/api/missions/$userId');
+    // Send the device local day so missions resolve to the player's "today", not server UTC.
+    final response = await _dio.get(
+      '/api/missions/$userId',
+      queryParameters: {'localDate': localGameDay()},
+    );
     final list = response.data as List<dynamic>;
     return list
         .map((e) => DailyMission.fromJson(e as Map<String, dynamic>))

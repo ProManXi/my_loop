@@ -13,4 +13,11 @@ public class ClaimRequest
     /// standalone claim, so a malformed id can never 400 the core claim path.
     /// </summary>
     public string? WalkSessionId { get; set; }
+
+    /// <summary>
+    /// Client's local calendar date ("yyyy-MM-dd"). Drives which day's daily missions this loop
+    /// claim progresses, so missions roll over on the player's local midnight (matching streaks and
+    /// the batch-step path), not server UTC. Absent/unparseable falls back to UTC today server-side.
+    /// </summary>
+    public string? LocalDate { get; set; }
 }

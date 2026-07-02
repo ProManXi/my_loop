@@ -49,11 +49,13 @@ public class MissionsController : ControllerBase
 
     /// <summary>Get today's daily missions for a user (generates them if not yet created).</summary>
     [HttpGet("{userId:guid}")]
-    public async Task<IActionResult> GetMissions([FromRoute] Guid userId)
+    public async Task<IActionResult> GetMissions([FromRoute] Guid userId, [FromQuery] string? localDate = null)
     {
         if (await DenySelf(userId) is { } deny) return deny;
 
-        var missions = await _missionService.GetTodaysMissions(userId);
+        // Resolve today's missions against the player's LOCAL day so they don't reset mid-day for
+        // players far from UTC (matches streaks and the claim paths).
+        var missions = await _missionService.GetTodaysMissions(userId, GameDay.Resolve(localDate));
         return Ok(missions.Select(m => new
         {
             m.Id,

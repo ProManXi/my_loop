@@ -256,7 +256,7 @@ public class UsersController : ControllerBase
     /// instead of 7 separate API calls.
     /// </summary>
     [HttpGet("{id:guid}/game-state")]
-    public async Task<IActionResult> GetGameState([FromRoute] Guid id)
+    public async Task<IActionResult> GetGameState([FromRoute] Guid id, [FromQuery] string? localDate = null)
     {
         if (await DenySelf(id) is { } deny) return deny;
 
@@ -271,7 +271,7 @@ public class UsersController : ControllerBase
 
         // Missions
         var missionService = HttpContext.RequestServices.GetRequiredService<IMissionService>();
-        var missions = await missionService.GetTodaysMissions(id);
+        var missions = await missionService.GetTodaysMissions(id, GameDay.Resolve(localDate));
 
         // Achievements
         var achievementService = HttpContext.RequestServices.GetRequiredService<IAchievementService>();

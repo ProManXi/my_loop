@@ -40,8 +40,12 @@ public class TerritoryService : ITerritoryService
         _logger = logger;
     }
 
-    public async Task<ClaimResult> ProcessClaim(Guid userId, double[][] path, Guid walkSessionId)
+    public async Task<ClaimResult> ProcessClaim(
+        Guid userId, double[][] path, Guid walkSessionId, string? clientLocalDate = null)
     {
+        // The player's local day drives today's daily missions (one "today", shared with streaks).
+        var gameDay = GameDay.Resolve(clientLocalDate);
+
         var validationError = await ValidateClaim(userId, path);
         if (validationError != null)
             return ClaimResult.Failure(validationError);
@@ -132,14 +136,14 @@ public class TerritoryService : ITerritoryService
             // Progress daily missions
             MissionProgressResult? missionResult = null;
             if (newCells + stolenCells > 0)
-                missionResult = await _missionService.RecordProgress(userId, MissionType.CaptureHexes, newCells + stolenCells);
+                missionResult = await _missionService.RecordProgress(userId, MissionType.CaptureHexes, newCells + stolenCells, gameDay);
             if (stolenCells > 0)
-                await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCells);
-            await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, newCells + stolenCells);
+                await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCells, gameDay);
+            await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, newCells + stolenCells, gameDay);
             // WalkDistance mission progress is recorded by the live batch-step path (#54),
             // not here, to avoid double-counting this walk's distance.
             if (newExplorations > 0)
-                await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations);
+                await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations, gameDay);
 
             // Check achievements
             var newAchievements = await _achievementService.CheckAndUnlock(userId);
@@ -222,6 +226,9 @@ public class TerritoryService : ITerritoryService
         // Cap batch size to prevent abuse / runaway transactions
         if (points.Count > 200)
             points = points.Take(200).ToList();
+
+        // The player's local day drives BOTH the streak and today's daily missions (one "today").
+        var gameDay = GameDay.Resolve(clientLocalDate);
 
         // 1. Resolve each point to its H3 hex (in memory, no DB)
         var resolved = points.Select(p => new
@@ -399,8 +406,7 @@ public class TerritoryService : ITerritoryService
                 user.TotalHexesCaptured += totalClaimedThisBatch;
                 user.TotalHexesStolen += stolenCellsCount;
 
-                var streakDate = ResolveStreakDate(clientLocalDate);
-                UpdateStreak(user, streakDate);
+                UpdateStreak(user, gameDay);
 
                 if (transfers.Count > 0)
                     await DecrementVictimHexCounts(userId, transfers);
@@ -411,19 +417,19 @@ public class TerritoryService : ITerritoryService
             if (totalClaimedThisBatch > 0)
             {
                 missionResult = await _missionService.RecordProgress(
-                    userId, MissionType.CaptureHexes, totalClaimedThisBatch);
+                    userId, MissionType.CaptureHexes, totalClaimedThisBatch, gameDay);
                 if (stolenCellsCount > 0)
-                    await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCellsCount);
-                await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, totalClaimedThisBatch);
+                    await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCellsCount, gameDay);
+                await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, totalClaimedThisBatch, gameDay);
                 // Real GPS distance for this slice (rounded to whole meters), replacing
                 // the prior ~30m-per-hex approximation so WalkDistance reflects actual walking.
                 var walkMeters = (int)Math.Round(batchDistanceMeters);
                 if (walkMeters > 0)
-                    await _missionService.RecordProgress(userId, MissionType.WalkDistance, walkMeters);
+                    await _missionService.RecordProgress(userId, MissionType.WalkDistance, walkMeters, gameDay);
                 if (newExplorations > 0)
-                    await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations);
+                    await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations, gameDay);
                 if (user.IsStreakActive)
-                    await _missionService.RecordProgress(userId, MissionType.MaintainStreak, 1);
+                    await _missionService.RecordProgress(userId, MissionType.MaintainStreak, 1, gameDay);
             }
 
             // 8. Achievements
@@ -1124,24 +1130,6 @@ public class TerritoryService : ITerritoryService
             user.MaxStreak = user.Streak;
     }
 
-    /// <summary>
-    /// Parses a client-supplied "yyyy-MM-dd" date and clamps it to within ±1 day
-    /// of UTC today. Prevents clients from manipulating dates to abuse streaks
-    /// while still respecting honest timezone differences.
-    /// </summary>
-    private static DateOnly ResolveStreakDate(string? clientLocalDate)
-    {
-        var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
-        if (string.IsNullOrWhiteSpace(clientLocalDate))
-            return utcToday;
-
-        if (!DateOnly.TryParseExact(clientLocalDate, "yyyy-MM-dd", out var parsed))
-            return utcToday;
-
-        if (parsed < utcToday.AddDays(-1)) return utcToday.AddDays(-1);
-        if (parsed > utcToday.AddDays(1)) return utcToday.AddDays(1);
-        return parsed;
-    }
 
     private async Task<bool> RecordExploration(Guid userId, long cellId)
     {
