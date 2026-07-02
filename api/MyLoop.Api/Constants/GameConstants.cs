@@ -112,6 +112,8 @@ public static class GameConstants
     public const int MaxHistoryDepth = 50;
     public const int MaxStolenCellsResponse = 200;
     public const int MaxStolenDaysLookback = 30;
+    /// <summary>Most-recent days of claim history summarised for the Home "Hex History" section.</summary>
+    public const int ClaimHistoryDays = 30;
 
     // --- Validation ---
     public const int MinDisplayNameLength = 2;
