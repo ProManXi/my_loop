@@ -18,7 +18,12 @@ public static class GameConstants
     public const int LoopSkipNeighbors = 10;
     public const double MinFillAreaSquareMeters = 5_000.0;
     public const double DeduplicationOverlapThreshold = 0.80;
-    public const double CellCooldownHours = 0.0167; // ~1 minute (for testing)
+    /// <summary>
+    /// Steal-back protection window: a just-captured cell cannot be stolen for this long.
+    /// A full day prevents ping-pong ownership flipping and matches the daily play loop
+    /// (missions, streaks, daily leaderboard finishes).
+    /// </summary>
+    public const double CellCooldownHours = 24.0;
 
     // --- H3 Hex Grid ---
     /// <summary>
