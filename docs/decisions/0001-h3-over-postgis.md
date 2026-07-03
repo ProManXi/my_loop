@@ -18,6 +18,10 @@ Use **Uber H3 at resolution 10** as the canonical cell grid. Store ownership key
 H3 parent IDs (`ParentCellId` res-3, `NeighborhoodId` res-8) as spatial buckets, plus
 `CenterLat`/`CenterLng` range scans for arbitrary viewports.
 
+> **Amendment (2026-07):** the canonical cell resolution has since moved from 10 to **11**
+> (~2,150 m²/cell); the parent buckets (res-3 / res-8) and the H3-over-PostGIS decision itself
+> are unchanged. See [spatial-model.md](../architecture/spatial-model.md).
+
 ## Consequences
 
 - **Positive:** Uniform global hexagons with no projection distortion. Built-in polygon fill

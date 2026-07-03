@@ -31,9 +31,9 @@ broadcasts the change to nearby players in real time.
 |-------|-----------|------|
 | Mobile | Flutter 3.44 / Dart 3.12 | Single codebase iOS + Android. Renders the map; records GPS; **renders server-authoritative state** (never the source of truth for ownership). |
 | State | Riverpod 3.x | Reactive feature slices (`xp`, `missions`, `profile`, `exploration`, `achievements`). |
-| Backend | .NET 10 / ASP.NET Core | Thin controllers → 9 interfaced services → EF Core. |
+| Backend | .NET 10 / ASP.NET Core | Thin controllers → 11 interfaced services → EF Core. |
 | Database | Neon (serverless PostgreSQL) | Ownership, claims, transfers, users. |
-| Spatial grid | Uber H3 (res-10) | Global uniform hexagons (~65 m wide). See [spatial-model.md](spatial-model.md). |
+| Spatial grid | Uber H3 (res-11) | Global uniform hexagons (~2,150 m², ~25 m edge). See [spatial-model.md](spatial-model.md). |
 | Real-time | SignalR (WebSocket) | Region-group broadcast of territory changes. See [realtime.md](realtime.md). |
 | Auth | Firebase Authentication | Sign in with Apple + Google. JWT validated server-side. |
 | Push | Firebase Cloud Messaging | "Your territory was stolen" while app is closed. |

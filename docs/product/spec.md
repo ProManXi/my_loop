@@ -157,7 +157,7 @@ flowchart TD
 |-------|-----------|-----|
 | Mobile | Flutter 3.44 / Dart 3.12 | Single codebase for iOS + Android. Fast iteration. |
 | Backend | .NET 10 (ASP.NET Core) | High-performance, SignalR built-in, EF Core for DB. |
-| Database | PostgreSQL 18 | GiST spatial indexes, reliable, free. |
+| Database | Neon (serverless PostgreSQL) | Managed, scales to zero; ownership keyed by H3 index (no PostGIS/GiST — see ADR 0001). |
 | Spatial Grid | H3 (Uber) via pocketken.H3 | Global hexagonal grid. Hierarchical (res 3→11). Consistent cell sizes worldwide. |
 | Real-Time | SignalR (WebSocket) | Built into ASP.NET, auto-fallback to long-polling, group-based broadcast. |
 | Auth | Firebase Authentication | Free, handles Google/Apple OAuth, JWT tokens. |
@@ -172,8 +172,8 @@ flowchart TD
 ```
 Controllers (thin) → Services (business logic) → EF Core (data access)
          ↑                    ↑                         ↑
-   Input validation    Interface-backed         PostgreSQL
-   Route → Service     Constructor-injected     GiST spatial index
+   Input validation    Interface-backed         Neon (Postgres)
+   Route → Service     Constructor-injected     H3 index keys
    ≤20 lines          ≤40 lines per method
 ```
 
@@ -362,7 +362,7 @@ sequenceDiagram
 | Min Walk Distance | 200m | Prevents trivial tap-and-claim abuse |
 | Max Claim Area | 5 km² | Prevents city-wide single-claim exploits |
 | Max Claims/Day | 20 | Fair daily cap |
-| Cell Cooldown | 5 hours | Anti-grief window |
+| Cell Cooldown | `GameConstants.CellCooldownHours` | Anti-grief steal-back window (see code for the current value) |
 | Loop Closure Distance | 50m | How close endpoints must be to detect a loop |
 | Min Loop Points | 20 | Loop must represent real walking |
 | Min Fill Area | 5,000 m² | Ignore tiny interior loops |
