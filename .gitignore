@@ -54,8 +54,16 @@ google-services.json
 *.ipa
 *.exe
 
-# Docs (generated)
-docs/architecture.md
+# Local dev artifacts
+venv/
+coverage/
+
+# Knowledge-vault tooling (generated locally by the external knowledge-kit; not project source).
+# CLAUDE.md is the canonical agent-instructions file — these are machine-rendered copies.
+.knowledge.json
+.clinerules
+.cursorrules
+.github/copilot-instructions.md
 
 # Test build output
 tests/**/bin/
