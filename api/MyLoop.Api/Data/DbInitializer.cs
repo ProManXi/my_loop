@@ -130,6 +130,10 @@ public static class DbInitializer
             "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"HomeCountry\" text NOT NULL DEFAULT ''");
         db.Database.ExecuteSqlRaw(
             "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"HomeContinent\" text NOT NULL DEFAULT ''");
+        // Home-change cooldown gate (anti-cheat, #84). Left NULL for existing rows so
+        // accounts that set home before this column existed get one tracked change.
+        db.Database.ExecuteSqlRaw(
+            "ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"HomeSetAt\" timestamp with time zone");
         db.Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS ""DailyMissions"" (
                 ""Id"" uuid NOT NULL,

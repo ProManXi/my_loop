@@ -82,6 +82,14 @@ public class User
     /// <summary>Home continent code (from reverse geocoding).</summary>
     public string HomeContinent { get; set; } = "";
 
+    /// <summary>
+    /// When the home location was last set (UTC). Gates re-homing to once per
+    /// <see cref="Constants.GameConstants.HomeChangeCooldownDays"/> (anti-cheat, #84).
+    /// Null until home is first set (or for accounts that set it before this field existed —
+    /// those get one tracked change before the cooldown applies).
+    /// </summary>
+    public DateTime? HomeSetAt { get; set; }
+
     /// <summary>Authentication provider used to create this account (e.g., "google", "apple", "local").</summary>
     public string AuthProvider { get; set; } = "local";
 

@@ -179,6 +179,8 @@ public class UsersController : ControllerBase
     /// <summary>
     /// Set the user's home location. Called during onboarding.
     /// Reverse geocodes the coordinates to determine city/state/country/continent.
+    /// Home drives decay distance and leaderboard scoping, so changes are gated to once
+    /// per <see cref="GameConstants.HomeChangeCooldownDays"/> and audited (anti-cheat, #84).
     /// </summary>
     [HttpPost("{id:guid}/home")]
     public async Task<IActionResult> SetHome([FromRoute] Guid id, [FromBody] SetHomeRequest request)
@@ -191,6 +193,29 @@ public class UsersController : ControllerBase
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound();
 
+        var cooldownEnds = user.HomeSetAt?.AddDays(GameConstants.HomeChangeCooldownDays);
+        if (cooldownEnds > DateTime.UtcNow)
+        {
+            _logger.LogWarning(
+                "Home change rejected for {UserId}: cooldown until {CooldownEnds} (requested {Lat},{Lng})",
+                id, cooldownEnds, request.Lat, request.Lng);
+            return StatusCode(StatusCodes.Status429TooManyRequests,
+                $"Home location can only be changed once every {GameConstants.HomeChangeCooldownDays} days");
+        }
+
+        if (user.HomeLat == null)
+        {
+            _logger.LogInformation("Home set for {UserId}: ({Lat},{Lng})", id, request.Lat, request.Lng);
+        }
+        else
+        {
+            // Audit trail for anti-cheat review: re-homing moves decay distance (and, for
+            // legacy accounts with empty City/Country, the leaderboard scope).
+            _logger.LogWarning(
+                "Home CHANGED for {UserId}: ({OldLat},{OldLng}) -> ({NewLat},{NewLng})",
+                id, user.HomeLat, user.HomeLng, request.Lat, request.Lng);
+        }
+
         // Reverse geocode to get city/state/country
         var location = await _geocoding.GetLocationInfo(request.Lat, request.Lng);
 
@@ -200,6 +225,7 @@ public class UsersController : ControllerBase
         user.HomeState = location.State;
         user.HomeCountry = location.Country;
         user.HomeContinent = location.Continent;
+        user.HomeSetAt = DateTime.UtcNow;
 
         // Also set City/Country for leaderboards if not already set
         if (string.IsNullOrEmpty(user.City))
