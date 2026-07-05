@@ -686,21 +686,31 @@ public class TerritoryService : ITerritoryService
 
     public async Task<List<ClaimHistoryEntry>> GetClaimHistory(Guid userId)
     {
-        // Group all owned territory cells by the date they were claimed
-        var dailyCounts = await _db.TerritoryCells
-            .Where(t => t.OwnerId == userId)
-            .GroupBy(t => t.ClaimedAt.Date)
-            .Select(g => new { Date = g.Key, Count = g.Count() })
-            .OrderByDescending(g => g.Date)
-            .Take(30)
+        // Aggregate the IMMUTABLE claim log by day — NOT live TerritoryCells. Grouping current
+        // ownership made a past day's count shrink as those hexes later decayed or were stolen, so
+        // "history" appeared to rewrite itself. The Claims table is append-only, so a day's total is
+        // fixed, and it reconciles with the per-walk rows the Walk History screen reads from the
+        // same table. AreaM2 is the stored per-claim value (summed), so both surfaces agree by
+        // construction regardless of the cell-area constant.
+        var dailyTotals = await _db.Claims
+            .Where(c => c.UserId == userId)
+            .GroupBy(c => c.CreatedAt.Date)
+            .Select(g => new
+            {
+                Date = g.Key,
+                CellCount = g.Sum(c => c.CellCount),
+                AreaM2 = g.Sum(c => c.AreaM2),
+            })
+            .OrderByDescending(x => x.Date)
+            .Take(GameConstants.ClaimHistoryDays)
             .ToListAsync();
 
-        var cellArea = GameConstants.CellAreaSquareMeters;
-        return dailyCounts.Select(d => new ClaimHistoryEntry
+        return dailyTotals.Select(d => new ClaimHistoryEntry
         {
+            // A daily summary spans multiple claims, so there is no single claim id.
             ClaimId = Guid.Empty,
-            CellCount = d.Count,
-            AreaM2 = d.Count * cellArea,
+            CellCount = d.CellCount,
+            AreaM2 = d.AreaM2,
             Date = d.Date,
         }).ToList();
     }
