@@ -14,6 +14,14 @@ public class DecayCleanupService : BackgroundService
     private readonly ILogger<DecayCleanupService> _logger;
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
 
+    /// <summary>
+    /// Max decayed cells released per run. Bounds each pass so a large backlog can't lock the
+    /// table for long; the remainder is picked up on the next hourly run. The owner HexCount
+    /// decrement is derived from THIS exact deleted set (see <see cref="CleanupDecayedCells"/>),
+    /// so a batched backlog can never double-count against HexCount.
+    /// </summary>
+    internal const int DecayBatchSize = 1000;
+
     public DecayCleanupService(IServiceScopeFactory scopeFactory, ILogger<DecayCleanupService> logger)
     {
         _scopeFactory = scopeFactory;
@@ -42,34 +50,11 @@ public class DecayCleanupService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Pure SQL: decrement owner hex counts and delete decayed cells in one shot.
-        // No entity loading, no memory pressure, no N+1 user lookups.
-        var decremented = await db.Database.ExecuteSqlRawAsync("""
-            WITH decayed AS (
-                SELECT "OwnerId", COUNT(*) as cnt
-                FROM "TerritoryCells"
-                WHERE "LastRefreshedAt" + ("DecayDays" || ' days')::interval < NOW()
-                GROUP BY "OwnerId"
-            )
-            UPDATE "Users" u
-            SET "HexCount" = GREATEST(0, u."HexCount" - d.cnt)
-            FROM decayed d
-            WHERE u."Id" = d."OwnerId"
-            """, ct);
-
-        var deleted = await db.Database.ExecuteSqlRawAsync("""
-            DELETE FROM "TerritoryCells"
-            WHERE "CellId" IN (
-                SELECT "CellId" FROM "TerritoryCells"
-                WHERE "LastRefreshedAt" + ("DecayDays" || ' days')::interval < NOW()
-                LIMIT 1000
-            )
-            """, ct);
+        var deleted = await ReleaseDecayedCellsAsync(db, DecayBatchSize, ct);
 
         if (deleted > 0)
         {
-            _logger.LogInformation("Decay cleanup: released {Count} cells, updated {Owners} owners",
-                deleted, decremented);
+            _logger.LogInformation("Decay cleanup: released {Count} cells", deleted);
         }
 
         // Break streaks for users who didn't claim yesterday
@@ -86,4 +71,45 @@ public class DecayCleanupService : BackgroundService
             _logger.LogInformation("Streak cleanup: broke {Count} inactive streaks", brokenStreaks);
         }
     }
+
+    /// <summary>
+    /// Releases up to <paramref name="batchSize"/> decayed cells and decrements their owners'
+    /// HexCount in a SINGLE atomic statement, both derived from the same MATERIALIZED
+    /// <c>decayed</c> set. Returns the number of cells released.
+    ///
+    /// This is the fix for the HexCount drift bug: the previous version decremented HexCount for
+    /// EVERY currently-decayed cell but deleted only a capped batch, so any decayed cell beyond
+    /// the cap survived and was decremented again on the next run — permanently under-counting
+    /// heavy owners. Here the decrement (the <c>upd</c> data-modifying CTE) and the delete (the
+    /// top-level statement) act on exactly the rows in <c>decayed</c>, so an owner's HexCount is
+    /// only ever reduced by the number of their cells actually released this run.
+    ///
+    /// Single statement ⇒ one implicit transaction ⇒ delete and decrement can never diverge, and
+    /// it participates in the configured Npgsql retry strategy automatically. <c>batchSize</c> is
+    /// passed as a bound SQL parameter (not string-interpolated), so the query is injection-safe.
+    /// </summary>
+    internal static Task<int> ReleaseDecayedCellsAsync(AppDbContext db, int batchSize, CancellationToken ct) =>
+        db.Database.ExecuteSqlRawAsync("""
+            WITH decayed AS MATERIALIZED (
+                SELECT "CellId", "OwnerId"
+                FROM "TerritoryCells"
+                WHERE "LastRefreshedAt" + ("DecayDays" || ' days')::interval < NOW()
+                LIMIT {0}
+            ),
+            counts AS (
+                SELECT "OwnerId", COUNT(*) AS cnt
+                FROM decayed
+                GROUP BY "OwnerId"
+            ),
+            upd AS (
+                UPDATE "Users" u
+                SET "HexCount" = GREATEST(0, u."HexCount" - c.cnt)
+                FROM counts c
+                WHERE u."Id" = c."OwnerId"
+                RETURNING 1
+            )
+            DELETE FROM "TerritoryCells" t
+            USING decayed d
+            WHERE t."CellId" = d."CellId"
+            """, new object[] { batchSize }, ct);
 }
