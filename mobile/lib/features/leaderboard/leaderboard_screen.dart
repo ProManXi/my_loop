@@ -230,7 +230,7 @@ class _PodiumItem extends StatelessWidget {
         children: [
           Text(medals[entry.rank - 1], style: const TextStyle(fontSize: 24)),
           const SizedBox(height: 4),
-          AvatarWidget(avatarId: entry.avatarId, color: entry.color, size: 44, hexes: entry.hexCount),
+          AvatarWidget(avatarId: entry.avatarId, color: entry.color, size: 44, hexes: entry.cellCount),
           const SizedBox(height: 4),
           Text(entry.displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13), overflow: TextOverflow.ellipsis, maxLines: 1),
           Text('${entry.cellCount} ⬡', style: TextStyle(fontSize: 11, color: AppColors.grey)),
@@ -297,13 +297,15 @@ class _RankingList extends StatelessWidget {
                     ),
                   ),
                 ),
-                AvatarWidget(avatarId: p.avatarId, color: p.color, size: 36, hexes: p.hexCount),
+                AvatarWidget(avatarId: p.avatarId, color: p.color, size: 36, hexes: p.cellCount),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Row(
                     children: [
                       // Tier indicator — small colored hexagon showing rank at a glance
-                      Icon(Icons.hexagon, size: 14, color: HexTier.fromHexes(p.hexCount).color),
+                      // Tier follows the snapshot cellCount so the badge matches the
+                      // count and rank shown in the same row (never the live User.HexCount).
+                      Icon(Icons.hexagon, size: 14, color: HexTier.fromHexes(p.cellCount).color),
                       const SizedBox(width: 5),
                       Expanded(
                         child: Text(
