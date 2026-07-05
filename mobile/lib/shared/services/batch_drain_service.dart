@@ -6,6 +6,7 @@ import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
 import 'package:myloop/shared/services/api_service.dart';
 import 'package:myloop/shared/services/step_claim_queue.dart';
+import 'package:myloop/shared/util/local_day.dart';
 
 final _log = Logger('BatchDrain');
 
@@ -107,14 +108,10 @@ class BatchDrainService {
       // server treats them as a standalone walk rather than rejecting an empty id.
       final sessionId = rawSessionId.isEmpty ? const Uuid().v4() : rawSessionId;
 
-      // Determine local date for streak calculation
-      final now = DateTime.now();
-      final localDate =
-          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-
       final response = await _api.claimBatchStep(
         userId: _userId,
-        localDate: localDate,
+        // Player's local day — drives streak AND today's missions server-side.
+        localDate: localGameDay(),
         walkSessionId: sessionId,
         points: batch,
       );

@@ -12,7 +12,7 @@ public interface ITerritoryService
     /// assigns ownership, and records transfers.
     /// Returns the claim result or an error message.
     /// </summary>
-    Task<ClaimResult> ProcessClaim(Guid userId, double[][] path, Guid walkSessionId);
+    Task<ClaimResult> ProcessClaim(Guid userId, double[][] path, Guid walkSessionId, string? clientLocalDate = null);
 
     /// <summary>
     /// Batch step claim: processes N GPS points atomically in a single transaction.
