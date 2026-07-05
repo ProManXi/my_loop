@@ -1,5 +1,5 @@
 {
   "_comment": "Ratcheting line-coverage floors (percent). CI fails if measured < floor. Only ever increase these, in the same PR that adds the covering tests. See scripts/coverage/check.sh.",
-  "backend": 19.0,
+  "backend": 20.0,
   "mobile": 19.0
 }
