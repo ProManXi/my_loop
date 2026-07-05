@@ -26,7 +26,18 @@ jobs:
         run: dotnet build api/MyLoop.Api/MyLoop.Api.csproj --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test tests/MyLoop.Api.Tests/MyLoop.Api.Tests.csproj --configuration Release
+        run: >
+          dotnet test tests/MyLoop.Api.Tests/MyLoop.Api.Tests.csproj
+          --configuration Release
+          --collect:"XPlat Code Coverage"
+          --results-directory ./coverage/backend
+
+      - name: Coverage gate (backend)
+        run: |
+          # -print -quit stops at the first match without a `find | head` pipe,
+          # which would SIGPIPE-fail under GitHub Actions' default bash -eo pipefail.
+          report="$(find ./coverage/backend -name 'coverage.cobertura.xml' -print -quit)"
+          scripts/coverage/check.sh backend "$report"
 
   mobile:
     name: Mobile (Flutter)
@@ -49,9 +60,14 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      # Unit/widget tests hard-gate merges. `live`-tagged tests need a running
+      # backend (no server in the runner) and are excluded here; run them
+      # separately with `flutter test --tags live` against a live API.
       - name: Test
-        continue-on-error: true
-        run: flutter test
+        run: flutter test --exclude-tags live --coverage
+
+      - name: Coverage gate (mobile)
+        run: ../scripts/coverage/check.sh mobile coverage/lcov.info
 
   # ADD THIS NEW JOB TO UNBLOCK YOUR GITHUB PRs
   security-scan:

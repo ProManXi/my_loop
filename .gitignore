@@ -60,3 +60,6 @@ docs/architecture.md
 # Test build output
 tests/**/bin/
 tests/**/obj/
+
+# Backend code-coverage output (dotnet test --results-directory ./coverage/backend)
+/coverage/

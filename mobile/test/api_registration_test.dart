@@ -1,7 +1,10 @@
 /// Integration tests for the API registration endpoint.
-/// Run with: dart test test/api_registration_test.dart
+/// Run with: dart test test/api_registration_test.dart --tags live
 ///
-/// Requires the API to be running at localhost:5048.
+/// Requires the API to be running at localhost:5048. Tagged `live` so the
+/// default CI unit/widget run (`flutter test --exclude-tags live`) skips it;
+/// it can never make an outbound localhost call in the sandboxed runner.
+@Tags(['live'])
 library;
 
 import 'package:flutter_test/flutter_test.dart';

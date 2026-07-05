@@ -1,0 +1,10 @@
+# Test tag configuration for the MyLoop Flutter app.
+#
+# `live` marks tests that require an external process (a running API at
+# localhost). They are excluded from the default gating CI run
+# (`flutter test --exclude-tags live`) because the sandboxed runner has no
+# server to reach. Run them explicitly with `flutter test --tags live` against
+# a live API.
+tags:
+  live:
+    description: Requires a running backend API (outbound localhost calls).
