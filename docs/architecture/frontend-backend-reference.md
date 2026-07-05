@@ -66,8 +66,8 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 │           └─────────┬───────────────┘                          │
 │                     ▼                                          │
 │           ┌──────────────────────┐                            │
-│           │   PostgreSQL 18      │                            │
-│           │   (Database)         │                            │
+│           │  Neon (serverless    │                            │
+│           │  PostgreSQL)         │                            │
 │           └──────────────────────┘                            │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -81,7 +81,7 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 | Endpoint | Method | Auth | Request Body | Response | Flutter Caller |
 |----------|--------|------|--------------|----------|-----------------|
 | `/api/users/register` | `POST` | ❌ No | `{firebaseUid, displayName, color, avatarId, authProvider}` | `{id, displayName, color, avatarId, ...}` | `auth_service.dart` → `apiService.register()` |
-| `/api/users/by-uid/{firebaseUid}` | `GET` | ❌ No | — | `{id, displayName, ...}` or 404 | `auth_service.dart` → `apiService.getUserByUid()` |
+| `/api/users/by-uid/{firebaseUid}` | `GET` | ✅ Yes | — | `{id, displayName, ...}` or 404 | `auth_service.dart` → `apiService.getUserByUid()` (caller may only look up their **own** UID) |
 | `/api/users/{id}` | `GET` | ✅ Yes | — | `{id, displayName, hexCount, level, ...}` | `apiService.getUser()` |
 | `/api/users/{id}` | `PATCH` | ✅ Yes | `{displayName?, avatarId?, color?}` | `{id, displayName, color, ...}` | `apiService.updateUser()` |
 | `/api/users/{id}/profile` | `GET` | ✅ Yes | — | `{id, displayName, rank, profile stats...}` | `apiService.getUserProfile()` |
@@ -95,8 +95,8 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 
 | Endpoint | Method | Auth | Request Body | Response | Flutter Caller |
 |----------|--------|------|--------------|----------|-----------------|
-| `/api/claims` | `POST` | ✅ Yes | `{userId, path: [[lat,lng]...]}` | `{id, cellCount, areaM2, createdAt}` | `apiService.submitClaim()` |
-| `/api/claims/batch-step` | `POST` | ✅ Yes | `{userId, localDate, points: [{lat,lng}...]}` | `{results: [], stats: {hexCount, totalCaptured, totalStolen, ...}, xp: {...}, missions: [], achievements: []}` | `apiService.claimBatchStep()` |
+| `/api/claims` | `POST` | ✅ Yes | `{userId, path: [[lat,lng]...], walkSessionId?}` | `{id, cellCount, areaM2, createdAt}` | `apiService.submitClaim()` |
+| `/api/claims/batch-step` | `POST` | ✅ Yes | `{userId, localDate, walkSessionId?, points: [{clientId, lat, lng, capturedAt}...]}` | `{results: [], stats: {hexCount, totalHexesCaptured, totalHexesStolen, streak, distanceKm, ...}, xp: {...}, missions: [], achievements: []}` | `apiService.claimBatchStep()` |
 | `/api/claims/preview` | `POST` | ✅ Yes | `{path: [[lat,lng]...]}` | `{boundaries: [[[lat,lng]...]...]}` | `apiService.previewClaim()` |
 
 ### Territory Queries
@@ -145,8 +145,8 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 |--------|-----------|---------|------|-------------|
 | `JoinRegion(regionId)` | `regionId: string` (H3 res-3 parent) | Subscribe to public hex updates for a geographic area (~12,000 km²) | ❌ No | `territoryRealtimeService.joinRegion()` |
 | `LeaveRegion(regionId)` | `regionId: string` | Unsubscribe from region updates (e.g., when panning map away) | ❌ No | `territoryRealtimeService.leaveRegion()` |
-| `JoinUserGroup()` | (no parameters) | Subscribe to personal state deltas (stats, XP, missions, achievements). UserId extracted from JWT claims server-side. | ✅ Yes | `territoryRealtimeService.connect()` + `_resubscribeAll()` |
-| `LeaveUserGroup()` | (no parameters) | Unsubscribe from personal group (e.g., on logout) | ✅ Yes | `territoryRealtimeService.disconnect()` |
+| `JoinUserGroup(userId)` | `userId` = caller's internal DB Guid | Subscribe to personal state deltas (stats, XP, missions, achievements). Server maps the JWT Firebase UID → internal id and **rejects a mismatch** — a caller may only join their own group. | ✅ Yes | `territoryRealtimeService.connect()` + `_resubscribeAll()` |
+| `LeaveUserGroup(userId)` | `userId` = caller's internal DB Guid | Unsubscribe from personal group (e.g., on logout) | ✅ Yes | `territoryRealtimeService.disconnect()` |
 
 ### Server → Client Events (Push Notifications)
 
@@ -166,7 +166,7 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 
 | Service | File | Purpose | Key Methods | Backend Connection |
 |---------|------|---------|-------------|-------------------|
-| **ApiService** | `api_service.dart` | HTTP REST client using Dio | `register()`, `getTerritories()`, `claimStep()`, `claimBatchStep()`, `getGameState()`, `getLeaderboard()`, `getDailyMissions()` | REST API endpoints (all HTTP endpoints above) |
+| **ApiService** | `api_service.dart` | HTTP REST client using Dio | `register()`, `getTerritories()`, `submitClaim()`, `claimBatchStep()`, `getGameState()`, `getLeaderboard()`, `getDailyMissions()` | REST API endpoints (all HTTP endpoints above) |
 | **AuthService** | `auth_service.dart` | Firebase Auth wrapper | `signInWithGoogle()`, `signInWithApple()`, `signOut()`, `getCurrentUser()` | Firebase auth (not MyLoop backend) |
 | **TerritoryRealtimeService** | `territory_realtime_service.dart` | SignalR hub connection | `connect()`, `disconnect()`, `joinRegion()`, `leaveRegion()` | TerritoryHub (SignalR) |
 | **LocationService** | `location_service.dart` | GPS tracking (Geolocator) | `getLocationUpdates()`, `getCurrentLocation()`, `requestPermission()` | Device GPS (no backend) |
@@ -196,7 +196,7 @@ Complete documentation of all API endpoints, SignalR hubs, WebSocket channels, a
 | `profileSliceProvider` | `profile_slice.dart` | `NotifierProvider` | `ProfileState {user, loadingUser, errorUser, ...}` | API `/api/users/{id}/game-state` | Home tab, profile drawer |
 | `xpSliceProvider` | `xp_slice.dart` | `NotifierProvider` | `XpState {totalXp, level, progressXp, progressPercent, ...}` | API + SignalR XpDelta | XP bar, level-up celebration |
 | `missionsSliceProvider` | `missions_slice.dart` | `NotifierProvider` | `MissionsState {missions: [], completed: int, ...}` | API `/api/missions/{userId}` + SignalR MissionDelta | Daily missions list |
-| `achievementsSliceProvider` | `achievements_slice.dart` | `NotifierProvider` | `AchievementsState {achievements: [], isLoaded, ...}` | API `/api/achievements/{userId}` + SignalR AchievementDelta | Achievements screen |
+| `achievementsSliceProvider` | `achievements_slice.dart` | `NotifierProvider` | `AchievementsState {achievements: [], isLoaded, ...}` | API `/api/achievements/{userId}` + SignalR `AchievementUnlocked` | Achievements screen |
 | `journeyControllerProvider` | `journey_controller.dart` | `NotifierProvider` | `JourneyState {status, path, distanceMeters, claimedCount, xpGainedThisWalk, ...}` | `LocationService` + API `/api/claims/batch-step` | Journey (walk) screen |
 | `homeTabLoadedProvider` | `home_tab.dart` | `NotifierProvider` | `bool` | Set on home tab init | Controls data loading trigger |
 
@@ -290,7 +290,7 @@ Home tab hex counter updates LIVE
 ```
 Friend's Journey (User B)
     ↓
-Calls POST /api/claims/step {userId: B, lat, lng}
+Calls POST /api/claims/batch-step {userId: B, walkSessionId, points: [...]}
     ↓
 (Backend: Captures cell from User A)
     ↓
@@ -370,7 +370,7 @@ Event: AchievementUnlocked {
   unlocks: [{id: "hexmaster1k", name: "Hex Master", icon: "🏆", xpAwarded: 200}]
 }
     ↓
-App receives AchievementDelta
+App receives AchievementUnlocked
     ↓
 achievementsSliceProvider marks achievement unlocked
     ↓
@@ -493,7 +493,7 @@ Authorization: Bearer {Firebase JWT}
 2. Backend extracts token via `OnMessageReceived` event
 3. Validates JWT
 4. Sets `Context.User` claims
-5. JoinUserGroup() extracts `userId` from `ClaimTypes.NameIdentifier` (read-only from JWT)
+5. `JoinUserGroup(userId)` maps the JWT Firebase UID → internal id and rejects any mismatch (a caller may only join their own personal group)
 
 ---
 
@@ -586,7 +586,7 @@ Authorization: Bearer {Firebase JWT}
 ├─────────────────────────────────────────────────────────────┤
 │ Id (PK) │ UserId (FK) │ CellCount │ AreaM2 │ CreatedAt │ ..│
 │ UUID    │ to Users    │ int       │ float  │ Timestamp │   │
-│         │             │ (27 hex=100m²)                │   │
+│         │             │ (res-11: ~2,150 m² per hex)   │   │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -715,14 +715,14 @@ GPS Points → Queue (StepClaimQueue)
                          ▼
 ┌────────────────────────────────────────────────────────────┐
 │      .NET 10 API (AWS/Azure/GCP)                           │
-│  - appsettings.json (secrets manager)                      │
-│  - Entity Framework Core + PostgreSQL 18                   │
+│  - user-secrets (dev) / secrets manager (prod)             │
+│  - Entity Framework Core + Neon (serverless PostgreSQL)    │
 │  - SignalR hub registration                                │
 └────────────────────────────────────────────────────────────┘
                          │
                          ▼
 ┌────────────────────────────────────────────────────────────┐
-│      PostgreSQL 18 (Cloud SQL / RDS / Managed Postgres)    │
+│      Neon (serverless PostgreSQL; any managed Postgres)    │
 │  - Users, TerritoryCells, Achievements, etc.               │
 │  - Backups enabled                                         │
 │  - SSL/TLS connection required                             │
@@ -753,7 +753,7 @@ GPS Points → Queue (StepClaimQueue)
 ### "SignalR not receiving events"
 
 1. ✅ Verify WebSocket connection established: check browser DevTools Network tab
-2. ✅ Confirm `JoinRegion(regionId)` or `JoinUserGroup()` invoked after connect
+2. ✅ Confirm `JoinRegion(regionId)` or `JoinUserGroup(userId)` invoked after connect
 3. ✅ Check Firebase JWT passed via query string, not None/empty
 4. ✅ Verify backend broadcasts to correct group name (e.g., `user_{userId}` not `user_wrong_id`)
 5. ✅ Check TerritoryHub methods actually call `_hubContext.Clients.Group(...).SendAsync(...)`

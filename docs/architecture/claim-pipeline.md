@@ -24,7 +24,7 @@ GPS Path (200m+ walk, ≥10 points)
     │
     ▼
 ┌─ Ownership Assignment (single DB transaction) ───────────┐
-│  • Skip cells on cooldown (5h protection)                 │
+│  • Skip cells on cooldown (steal-back protection window)  │
 │  • Skip self-owned cells                                  │
 │  • Steal from others → write a CellTransfer row           │
 │  • Update owner stats (hex count, streak, distance)       │

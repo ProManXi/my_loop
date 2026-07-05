@@ -6,8 +6,8 @@
 
 ## The grid
 
-MyLoop uses **Uber H3 at resolution 10** as the canonical cell grid — global, uniform
-hexagons ~65 m wide (~4,234 m² each). Each `TerritoryCell` is keyed by its 64-bit H3 index
+MyLoop uses **Uber H3 at resolution 11** as the canonical cell grid — global, uniform
+hexagons of ~2,150 m² (~25 m edge). Each `TerritoryCell` is keyed by its 64-bit H3 index
 (`CellId`), which uniquely identifies a hexagon on Earth.
 
 H3 gives us, for free:
@@ -32,8 +32,9 @@ queries at scale:
 
 | Field | H3 res | Approx size | Use |
 |-------|--------|-------------|-----|
-| `ParentCellId` | 3 | ~12 km zone | City-level bucket; SignalR region groups; partition pruning. |
-| `NeighborhoodId` | 8 | ~700 m | Per-area ownership counts (exploration feature). |
+| `CellId` | 11 | ~2,150 m² (~25 m edge) | The claimable cell itself; primary key of `TerritoryCell`. |
+| `ParentCellId` | 3 | ~12,000 km² | City/region-scale bucket; SignalR region groups; partition pruning. |
+| `NeighborhoodId` | 8 | ~0.74 km² | Per-area ownership counts (exploration feature). |
 
 **Query rule:** viewport and "nearby" queries should filter **bucket-first**
 (`ParentCellId` / `NeighborhoodId`), then refine by `CenterLat`/`CenterLng`. H3 *is* the

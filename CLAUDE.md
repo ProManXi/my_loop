@@ -141,7 +141,7 @@ Before opening **or** merging a PR, run the skill(s) relevant to what the PR tou
 This is a hard gate. Note in the PR description which skills were run.
 
 Skills live in `.claude/skills/` (vendored from [ECC](https://github.com/affaan-m/ECC),
-chosen from MyLoop's documented failure classes in `architecturalIssues_11th_June2026.md`).
+chosen from MyLoop's documented failure classes).
 
 | If the PR touches… | Run before opening/merging |
 |--------------------|----------------------------|
