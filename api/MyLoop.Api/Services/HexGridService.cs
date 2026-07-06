@@ -78,6 +78,15 @@ public class HexGridService : IHexGridService
         return (long)(ulong)parent;
     }
 
+    public bool IsValidRegionId(string regionId)
+    {
+        if (!long.TryParse(regionId, out var cellId))
+            return false;
+
+        var index = ToH3Index(cellId);
+        return index.IsValidCell && index.Resolution == GameConstants.H3ParentResolution;
+    }
+
     public double CalculateArea(int cellCount)
     {
         return cellCount * GameConstants.CellAreaSquareMeters;

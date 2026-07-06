@@ -14,11 +14,13 @@ namespace MyLoop.Api.Hubs;
 public class TerritoryHub : Hub
 {
     private readonly IUserService _users;
+    private readonly IHexGridService _hexGrid;
     private readonly ILogger<TerritoryHub> _logger;
 
-    public TerritoryHub(IUserService users, ILogger<TerritoryHub> logger)
+    public TerritoryHub(IUserService users, IHexGridService hexGrid, ILogger<TerritoryHub> logger)
     {
         _users = users;
+        _hexGrid = hexGrid;
         _logger = logger;
     }
 
@@ -44,6 +46,18 @@ public class TerritoryHub : Hub
     /// </summary>
     public async Task JoinRegion(string regionId)
     {
+        // regionId is caller-supplied. Region groups are named by a res-3 H3 cell id, but personal
+        // delta groups are named "user_{guid}" (see TerritoryNotifier). Without this check a caller
+        // could pass any string — including another user's "user_{guid}" — and receive that user's
+        // private stat/XP/mission deltas. Constrain the group name to a genuine region id so only
+        // real, public map regions can be joined.
+        if (!_hexGrid.IsValidRegionId(regionId))
+        {
+            _logger.LogWarning("Rejected JoinRegion with non-region id {RegionId} on {ConnectionId}",
+                regionId, Context.ConnectionId);
+            throw new HubException("Invalid region id.");
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, regionId);
     }
 
