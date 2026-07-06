@@ -412,7 +412,7 @@ public class TerritoryService : ITerritoryService
                     await DecrementVictimHexCounts(userId, transfers);
             }
 
-            // 7. Mission progress (only if something happened)
+            // 7. Mission progress (claim-gated types only)
             MissionProgressResult? missionResult = null;
             if (totalClaimedThisBatch > 0)
             {
@@ -421,15 +421,26 @@ public class TerritoryService : ITerritoryService
                 if (stolenCellsCount > 0)
                     await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCellsCount, gameDay);
                 await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, totalClaimedThisBatch, gameDay);
-                // Real GPS distance for this slice (rounded to whole meters), replacing
-                // the prior ~30m-per-hex approximation so WalkDistance reflects actual walking.
-                var walkMeters = (int)Math.Round(batchDistanceMeters);
-                if (walkMeters > 0)
-                    await _missionService.RecordProgress(userId, MissionType.WalkDistance, walkMeters, gameDay);
                 if (newExplorations > 0)
                     await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations, gameDay);
                 if (user.IsStreakActive)
                     await _missionService.RecordProgress(userId, MissionType.MaintainStreak, 1, gameDay);
+            }
+
+            // WalkDistance mirrors the DistanceKm stat accrued above, so it progresses on
+            // EVERY slice with movement — including zero-claim laps inside territory the
+            // user already owns, which previously advanced the profile stat while the
+            // "Walk N meters" mission stayed frozen (#118). Real GPS distance, rounded to
+            // whole meters (not the old ~30m-per-hex approximation).
+            var walkMeters = (int)Math.Round(batchDistanceMeters);
+            if (walkMeters > 0)
+            {
+                var walkResult = await _missionService.RecordProgress(
+                    userId, MissionType.WalkDistance, walkMeters, gameDay);
+                // On a zero-claim slice this is the only mission update; carry it into the
+                // response so the client's mission card moves. When claims happened,
+                // missionResult's tracked mission list already reflects this call.
+                missionResult ??= walkResult;
             }
 
             // 8. Achievements
