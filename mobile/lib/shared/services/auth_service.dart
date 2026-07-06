@@ -21,6 +21,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:myloop/shared/services/game_state_cache.dart';
+import 'package:myloop/shared/services/notification_cache.dart';
 import 'package:myloop/shared/services/profile_cache.dart';
 import 'package:myloop/shared/services/territory_cache.dart';
 
@@ -152,6 +153,7 @@ class AuthService {
     await ProfileCache.clear();
     await GameStateCache.clear();
     await TerritoryCache.clear();
+    await NotificationCache.clear(); // notification inbox is user-bound too (#30)
     // Only attempt Google sign-out if we previously initialized the SDK.
     if (_googleInitialized) {
       await GoogleSignIn.instance.signOut();

@@ -9,8 +9,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myloop/app/theme.dart';
 import 'package:myloop/shared/services/notification_service.dart';
 
-class NotificationsScreen extends ConsumerWidget {
+class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
+
+  @override
+  ConsumerState<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Mark read ONCE per visit (not on every rebuild — the old post-frame call in build()
+    // was a Riverpod anti-pattern that also masked unread counts arriving while open, #30).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(notificationProvider.notifier).markAllRead();
+    });
+  }
 
   String _formatTime(DateTime dt) {
     final diff = DateTime.now().difference(dt);
@@ -21,13 +36,8 @@ class NotificationsScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final notifications = ref.watch(notificationProvider);
-
-    // Mark all as read when screen opens
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(notificationProvider.notifier).markAllRead();
-    });
 
     return Scaffold(
       backgroundColor: AppColors.snow,
