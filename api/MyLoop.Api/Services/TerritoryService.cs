@@ -223,9 +223,12 @@ public class TerritoryService : ITerritoryService
         if (points == null || points.Count == 0)
             return new BatchStepClaimResponse();
 
-        // Cap batch size to prevent abuse / runaway transactions
-        if (points.Count > 200)
-            points = points.Take(200).ToList();
+        // Fail loud on oversized batches — truncating instead would drop points without
+        // ACKing them, and the client WAL only evicts ACKed points, jamming its queue
+        // forever (#117). The controller 400s first; this guards against that check drifting.
+        if (points.Count > GameConstants.MaxBatchStepPoints)
+            throw new ArgumentException(
+                $"Batch exceeds {GameConstants.MaxBatchStepPoints} points", nameof(points));
 
         // The player's local day drives BOTH the streak and today's daily missions (one "today").
         var gameDay = GameDay.Resolve(clientLocalDate);

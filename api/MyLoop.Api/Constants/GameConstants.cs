@@ -107,6 +107,14 @@ public static class GameConstants
     /// <summary>Hard cap on GPS points accepted in a single claim/trail submission (DoS guard).</summary>
     public const int MaxClaimPathPoints = 50_000;
 
+    /// <summary>
+    /// Hard cap on points in one batch-step claim. Single source for the controller's 400
+    /// guard and the service's fail-loud check — the pair must never drift apart, because a
+    /// batch that is truncated instead of rejected leaves un-ACKed points jamming the
+    /// client's write-ahead log forever (#117). The mobile drainer sends at most 50.
+    /// </summary>
+    public const int MaxBatchStepPoints = 200;
+
     // --- GPS / Geolocation ---
     public const double EarthRadiusMeters = 6_371_000.0;
     public const double MetersPerDegreeLat = 111_320.0;
