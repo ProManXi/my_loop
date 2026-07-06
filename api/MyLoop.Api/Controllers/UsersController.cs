@@ -100,7 +100,8 @@ public class UsersController : ControllerBase
 
         var user = await _userService.Register(request, firebaseUid, authProvider);
         _logger.LogInformation("New user registered: {UserId}", user.Id);
-        return Created($"/api/users/{user.Id}", user);
+        // Owner sees their own account → self projection (no FirebaseUid / home coords).
+        return Created($"/api/users/{user.Id}", UserSelfResponse.FromUser(user));
     }
 
     /// <summary>
@@ -121,7 +122,8 @@ public class UsersController : ControllerBase
     {
         var user = await _userService.GetById(id);
         if (user == null) return NotFound();
-        return Ok(user);
+        // Any authenticated user can call this for any id → public projection only.
+        return Ok(UserResponse.FromUser(user));
     }
 
     /// <summary>
@@ -140,7 +142,8 @@ public class UsersController : ControllerBase
 
         var user = await _userService.GetByFirebaseUid(firebaseUid);
         if (user == null) return NotFound();
-        return Ok(user);
+        // Self-only (guarded above) → owner projection.
+        return Ok(UserSelfResponse.FromUser(user));
     }
 
     /// <summary>
@@ -170,7 +173,8 @@ public class UsersController : ControllerBase
 
         var user = await _userService.UpdateProfile(id, request);
         if (user == null) return NotFound();
-        return Ok(user);
+        // Self-only (DenySelf above) → owner projection.
+        return Ok(UserSelfResponse.FromUser(user));
     }
 
     /// <summary>
