@@ -46,10 +46,13 @@ void main() {
       // The tab is in loading state - no "Ready to conquer" text yet
       expect(find.textContaining('Ready to conquer'), findsNothing);
 
-      // Pump past timer to avoid pending timer error
+      // Advance past the 600ms shimmer delay so content mounts.
       await tester.pump(const Duration(milliseconds: 700));
-      // skip: leaves a pending content-side Timer at teardown — see #71
-    }, skip: true);
+
+      // Content has pulsing children with repeat() animation controllers; unmount
+      // the tree so those tickers dispose and no timer is left pending (#71).
+      await tester.pumpWidget(const SizedBox());
+    });
 
     testWidgets('shows content after 600ms', (tester) async {
       await tester.pumpWidget(
@@ -66,7 +69,10 @@ void main() {
 
       // Should now show actual content
       expect(find.textContaining('Ready to conquer'), findsOneWidget);
-      // skip: leaves a pending content-side Timer at teardown — see #71
-    }, skip: true);
+
+      // Unmount so the content's repeat() animation controllers dispose and
+      // leave no pending timer at teardown (#71).
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 }

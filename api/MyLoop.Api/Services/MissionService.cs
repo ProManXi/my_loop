@@ -150,14 +150,31 @@ public class MissionService : IMissionService
         }
         catch (DbUpdateException)
         {
-            // Concurrent achievement unlock caused unique constraint violation.
-            // Remove conflicting achievement entries and retry save.
+            // A concurrent writer already inserted one of the achievement rows we're adding,
+            // so the unique (UserId, AchievementId) index rejected the save. We detach the
+            // losing rows and retry — but AchievementService already applied each unlock's XP
+            // to user.TotalXp. Detaching the row WITHOUT reversing that XP would leave the user
+            // permanently credited for an achievement they no longer own (double-award relative
+            // to the winning writer). So revoke each detached unlock's XP first.
+            var user = await _db.Users.FindAsync(userId);
             var conflicting = _db.ChangeTracker.Entries<UserAchievement>()
                 .Where(e => e.State == EntityState.Added)
                 .ToList();
             foreach (var entry in conflicting)
+            {
+                if (user != null)
+                    XpLedger.Revoke(user, entry.Entity.XpAwarded);
                 entry.State = EntityState.Detached;
+            }
             await _db.SaveChangesAsync();
+
+            // Reflect the corrected totals in the result the caller pushes to the client.
+            if (user != null)
+            {
+                result.TotalXp = user.TotalXp;
+                result.LeveledUp = user.Level > result.PreviousLevel;
+                result.Level = user.Level;
+            }
         }
         return result;
     }
@@ -168,8 +185,7 @@ public class MissionService : IMissionService
         if (user == null) return new XpGainResult();
 
         var previousLevel = user.Level;
-        user.TotalXp += xp;
-        user.Level = GameConstants.LevelFromXp(user.TotalXp);
+        XpLedger.Grant(user, xp);
 
         return new XpGainResult
         {

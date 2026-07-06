@@ -6,6 +6,7 @@
 /// "pro tip" card for engagement. Shows shimmer loading on initial load.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -470,14 +471,23 @@ class _MissionCountdown extends StatefulWidget {
 class _MissionCountdownState extends State<_MissionCountdown> {
   late Duration _remaining;
   late final _ticker = Stream.periodic(const Duration(seconds: 30));
+  StreamSubscription<void>? _tickerSub;
 
   @override
   void initState() {
     super.initState();
     _remaining = _calcRemaining();
-    _ticker.listen((_) {
+    _tickerSub = _ticker.listen((_) {
       if (mounted) setState(() => _remaining = _calcRemaining());
     });
+  }
+
+  @override
+  void dispose() {
+    // Without this the periodic subscription (and its underlying timer) leaks
+    // for the app's lifetime every time the home tab is rebuilt (#71).
+    _tickerSub?.cancel();
+    super.dispose();
   }
 
   Duration _calcRemaining() {

@@ -223,9 +223,12 @@ public class TerritoryService : ITerritoryService
         if (points == null || points.Count == 0)
             return new BatchStepClaimResponse();
 
-        // Cap batch size to prevent abuse / runaway transactions
-        if (points.Count > 200)
-            points = points.Take(200).ToList();
+        // Fail loud on oversized batches — truncating instead would drop points without
+        // ACKing them, and the client WAL only evicts ACKed points, jamming its queue
+        // forever (#117). The controller 400s first; this guards against that check drifting.
+        if (points.Count > GameConstants.MaxBatchStepPoints)
+            throw new ArgumentException(
+                $"Batch exceeds {GameConstants.MaxBatchStepPoints} points", nameof(points));
 
         // The player's local day drives BOTH the streak and today's daily missions (one "today").
         var gameDay = GameDay.Resolve(clientLocalDate);
@@ -412,7 +415,7 @@ public class TerritoryService : ITerritoryService
                     await DecrementVictimHexCounts(userId, transfers);
             }
 
-            // 7. Mission progress (only if something happened)
+            // 7. Mission progress (claim-gated types only)
             MissionProgressResult? missionResult = null;
             if (totalClaimedThisBatch > 0)
             {
@@ -421,15 +424,26 @@ public class TerritoryService : ITerritoryService
                 if (stolenCellsCount > 0)
                     await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCellsCount, gameDay);
                 await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, totalClaimedThisBatch, gameDay);
-                // Real GPS distance for this slice (rounded to whole meters), replacing
-                // the prior ~30m-per-hex approximation so WalkDistance reflects actual walking.
-                var walkMeters = (int)Math.Round(batchDistanceMeters);
-                if (walkMeters > 0)
-                    await _missionService.RecordProgress(userId, MissionType.WalkDistance, walkMeters, gameDay);
                 if (newExplorations > 0)
                     await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations, gameDay);
                 if (user.IsStreakActive)
                     await _missionService.RecordProgress(userId, MissionType.MaintainStreak, 1, gameDay);
+            }
+
+            // WalkDistance mirrors the DistanceKm stat accrued above, so it progresses on
+            // EVERY slice with movement — including zero-claim laps inside territory the
+            // user already owns, which previously advanced the profile stat while the
+            // "Walk N meters" mission stayed frozen (#118). Real GPS distance, rounded to
+            // whole meters (not the old ~30m-per-hex approximation).
+            var walkMeters = (int)Math.Round(batchDistanceMeters);
+            if (walkMeters > 0)
+            {
+                var walkResult = await _missionService.RecordProgress(
+                    userId, MissionType.WalkDistance, walkMeters, gameDay);
+                // On a zero-claim slice this is the only mission update; carry it into the
+                // response so the client's mission card moves. When claims happened,
+                // missionResult's tracked mission list already reflects this call.
+                missionResult ??= walkResult;
             }
 
             // 8. Achievements
@@ -567,11 +581,11 @@ public class TerritoryService : ITerritoryService
                 OwnerName = t.Owner!.DisplayName,
                 t.CooldownExpiresAt,
                 t.ParentCellId,
-                t.LastRefreshedAt
+                t.LastRefreshedAt,
+                t.DecayDays
             })
             .ToListAsync();
 
-        var decaySeconds = GameConstants.DecayDays * 86400.0;
         return filtered.Select(t => new TerritoryCellResponse
         {
             CellId = t.CellId,
@@ -581,9 +595,19 @@ public class TerritoryService : ITerritoryService
             OwnerName = t.OwnerName,
             CooldownExpiresAtUtc = t.CooldownExpiresAt,
             ParentCellId = t.ParentCellId,
-            DecayProgress = Math.Clamp(
-                (DateTime.UtcNow - t.LastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0),
+            DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
         }).ToList();
+    }
+
+    /// <summary>
+    /// Fraction of a cell's OWN decay window elapsed since its last refresh (0..1). Each cell
+    /// carries its capture-time DecayDays (7–90 by home distance) — using the global default
+    /// here made every slow-decay cell render fully decayed after 7 days (#105).
+    /// </summary>
+    private static double ComputeDecayProgress(DateTime lastRefreshedAt, int decayDays)
+    {
+        var decaySeconds = decayDays * 86400.0;
+        return Math.Clamp((DateTime.UtcNow - lastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0);
     }
 
     public async Task<TerritoryStatsResponse> GetUserStats(Guid userId)
@@ -671,11 +695,11 @@ public class TerritoryService : ITerritoryService
                 OwnerName = t.Owner!.DisplayName,
                 t.CooldownExpiresAt,
                 t.ParentCellId,
-                t.LastRefreshedAt
+                t.LastRefreshedAt,
+                t.DecayDays
             })
             .ToListAsync();
 
-        var decaySeconds = GameConstants.DecayDays * 86400.0;
         return cells.Select(t => new TerritoryCellResponse
         {
             CellId = t.CellId,
@@ -685,8 +709,7 @@ public class TerritoryService : ITerritoryService
             OwnerName = t.OwnerName,
             CooldownExpiresAtUtc = t.CooldownExpiresAt,
             ParentCellId = t.ParentCellId,
-            DecayProgress = Math.Clamp(
-                (DateTime.UtcNow - t.LastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0),
+            DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
         }).ToList();
     }
 
@@ -1116,6 +1139,11 @@ public class TerritoryService : ITerritoryService
     /// Caller passes client's local date (clamped to UTC ±1 day) so users near
     /// timezone boundaries don't lose streaks. First-ever claim seeds streak=1
     /// without resetting an existing streak that was set elsewhere.
+    ///
+    /// Pairs with the background reaper <c>DecayCleanupService.BreakStaleStreaksAsync</c>: because
+    /// this records LastClaimDate in the player's LOCAL frame (clamped to UTC ±1), the UTC-only
+    /// reaper must allow a matching grace (<see cref="GameConstants.StreakBreakUtcGraceDays"/>) so
+    /// it never breaks a streak this method still considers alive.
     /// </summary>
     private static void UpdateStreak(User user, DateOnly today)
     {

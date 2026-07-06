@@ -99,13 +99,38 @@ public static class GameConstants
     /// <summary>Total child cells at res-11 within one res-8 neighborhood hex (7^3 = 343).</summary>
     public const int CellsPerNeighborhood = 343;
 
+    // --- Streak ---
+    /// <summary>
+    /// Days of no claim (measured in UTC) after which the background job breaks a streak.
+    /// The claim path records LastClaimDate from the player's LOCAL date, clamped to UTC ±1 by
+    /// TerritoryService.ResolveStreakDate. A streak that is still alive in SOME timezone can
+    /// therefore have a LastClaimDate as old as (UTC today − 2). The UTC-only cleanup must not
+    /// break those, so it only breaks LastClaimDate &lt; (UTC today − this value). At 2, the job
+    /// never breaks a streak an honest local-date claim would still consider alive, and breaks it
+    /// once it is definitely dead in every timezone.
+    /// </summary>
+    public const int StreakBreakUtcGraceDays = 2;
+
     // --- Viewport / Query Limits ---
     public const int MaxViewportCells = 500;
     public const int MaxUserTerritoryCells = 2000;
     public const int MaxPreviewPathLength = 10_000;
 
-    /// <summary>Hard cap on GPS points accepted in a single claim/trail submission (DoS guard).</summary>
-    public const int MaxClaimPathPoints = 50_000;
+    /// <summary>
+    /// Hard cap on GPS points accepted in a single claim/trail submission (DoS guard).
+    /// Sized to a walking-realistic ceiling: 6 h × 1 point / 5 s ≈ 4,320, rounded to 6,000.
+    /// No legitimate walk exceeds this; larger submissions are rejected 400 (see
+    /// ClaimsController). Bounds the loop-closure spatial scan (#116 / ML-ERR-019).
+    /// </summary>
+    public const int MaxClaimPathPoints = 6_000;
+
+    /// <summary>
+    /// Hard cap on points in one batch-step claim. Single source for the controller's 400
+    /// guard and the service's fail-loud check — the pair must never drift apart, because a
+    /// batch that is truncated instead of rejected leaves un-ACKed points jamming the
+    /// client's write-ahead log forever (#117). The mobile drainer sends at most 50.
+    /// </summary>
+    public const int MaxBatchStepPoints = 200;
 
     // --- GPS / Geolocation ---
     public const double EarthRadiusMeters = 6_371_000.0;
@@ -142,7 +167,6 @@ public static class GameConstants
     public const int MissionsPerDay = 3;
 
     /// <summary>XP threshold to reach a given level. Level 1 = 0 XP, Level 2 = 100 XP, Level 3 = 400 XP, Level 10 = 8100 XP.</summary>
-    /// <summary>XP threshold to reach a given level. Level 1 = 0 XP, Level 2 = 100 XP, Level 10 = 8100 XP.</summary>
     public static int XpForLevel(int level) => (level - 1) * (level - 1) * 100;
     public static int LevelFromXp(long xp)
     {

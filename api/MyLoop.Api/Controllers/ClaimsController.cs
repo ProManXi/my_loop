@@ -83,8 +83,8 @@ public class ClaimsController : ControllerBase
         if (request?.Points == null || request.Points.Count == 0)
             return BadRequest("No points provided");
 
-        if (request.Points.Count > 200)
-            return BadRequest("Too many points in a single batch (max 200)");
+        if (request.Points.Count > GameConstants.MaxBatchStepPoints)
+            return BadRequest($"Too many points in a single batch (max {GameConstants.MaxBatchStepPoints})");
 
         foreach (var p in request.Points)
         {

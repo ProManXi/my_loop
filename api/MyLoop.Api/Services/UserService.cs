@@ -16,10 +16,8 @@ public class UserService : IUserService
         _validation = validation;
     }
 
-    public async Task<User> Register(RegisterRequest request)
+    public async Task<User> Register(RegisterRequest request, string firebaseUid, string authProvider)
     {
-        var (firebaseUid, authProvider) = ResolveIdentity(request);
-
         var existing = await _db.Users.FirstOrDefaultAsync(u => u.FirebaseUid == firebaseUid);
         if (existing != null) return existing;
 
@@ -85,21 +83,6 @@ public class UserService : IUserService
     // ──────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
-
-    private static (string FirebaseUid, string AuthProvider) ResolveIdentity(RegisterRequest request)
-    {
-        var authProvider = request.AuthProvider ?? "local";
-        var firebaseUid = request.FirebaseUid;
-
-        if (string.IsNullOrWhiteSpace(firebaseUid)
-            || firebaseUid.StartsWith("dev_")
-            || firebaseUid.StartsWith("local_"))
-        {
-            return ($"local_{Guid.NewGuid():N}", "local");
-        }
-
-        return (firebaseUid, authProvider);
-    }
 
     private static User BuildNewUser(string firebaseUid, string authProvider, RegisterRequest request)
     {
