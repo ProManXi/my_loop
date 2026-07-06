@@ -90,10 +90,17 @@ public class HexGridService : IHexGridService
     {
         if (path.Length < GameConstants.MinLoopPoints) return false;
 
+        // Spatial hash instead of the previous O(n²) all-pairs haversine scan (#116): with
+        // MaxClaimPathPoints at 50k that admitted ~2.5×10⁹ haversines per request, a pure-CPU
+        // DoS on the pre-transaction claim path. The index only surfaces points within the
+        // closure radius, and the exact haversine check below preserves the original semantics.
+        var index = ClosureSpatialIndex.Build(path);
         for (int i = GameConstants.LoopSkipNeighbors; i < path.Length; i++)
         {
-            for (int j = 0; j <= i - GameConstants.MinLoopPoints; j++)
+            var maxJ = i - GameConstants.MinLoopPoints;
+            foreach (var j in index.Candidates(path[i][0], path[i][1]))
             {
+                if (j > maxJ) continue;
                 var dist = _geoService.HaversineMeters(
                     path[i][0], path[i][1], path[j][0], path[j][1]);
                 if (dist <= GameConstants.LoopClosureDistanceMeters) return true;
@@ -203,32 +210,43 @@ public class HexGridService : IHexGridService
         return loops;
     }
 
-    private void FindClosureLoops(double[][] path, bool[] used, List<double[][]> loops)
+    // internal (not private) so the equivalence test can drive it directly against a brute-force
+    // reference; InternalsVisibleTo MyLoop.Api.Tests is configured in the csproj.
+    internal void FindClosureLoops(double[][] path, bool[] used, List<double[][]> loops)
     {
+        // Spatial hash replacing the previous O(n²) inner scan (#116). The original picked, for
+        // each i, the SMALLEST unused j ≤ i-MinLoopPoints within the closure radius; we reproduce
+        // that exactly by taking the minimum qualifying candidate the index surfaces. The index is
+        // a superset of all within-radius points, and the haversine check below is unchanged, so
+        // the loop set is identical to the brute-force version (proven by the equivalence test).
+        var index = ClosureSpatialIndex.Build(path);
         for (int i = GameConstants.LoopSkipNeighbors; i < path.Length; i++)
         {
             if (used[i]) continue;
 
-            for (int j = 0; j <= i - GameConstants.MinLoopPoints; j++)
+            var maxJ = i - GameConstants.MinLoopPoints;
+            var bestJ = -1;
+            foreach (var j in index.Candidates(path[i][0], path[i][1]))
             {
-                if (used[j]) continue;
+                if (j > maxJ || used[j] || j >= bestJ && bestJ != -1) continue;
 
                 var dist = _geoService.HaversineMeters(
                     path[i][0], path[i][1],
                     path[j][0], path[j][1]);
 
-                if (dist > GameConstants.LoopClosureDistanceMeters) continue;
-
-                var loopLength = i - j + 1;
-                var loop = new double[loopLength][];
-                Array.Copy(path, j, loop, 0, loopLength);
-                loops.Add(loop);
-
-                for (int k = j; k <= i; k++)
-                    used[k] = true;
-
-                break;
+                if (dist <= GameConstants.LoopClosureDistanceMeters)
+                    bestJ = j;
             }
+
+            if (bestJ < 0) continue;
+
+            var loopLength = i - bestJ + 1;
+            var loop = new double[loopLength][];
+            Array.Copy(path, bestJ, loop, 0, loopLength);
+            loops.Add(loop);
+
+            for (int k = bestJ; k <= i; k++)
+                used[k] = true;
         }
     }
 
@@ -239,6 +257,83 @@ public class HexGridService : IHexGridService
         var end = path[^1];
         return _geoService.HaversineMeters(start[0], start[1], end[0], end[1])
                <= GameConstants.LoopClosureDistanceMeters;
+    }
+
+    /// <summary>
+    /// Uniform-grid spatial hash over a GPS path used to find loop-closure candidates without an
+    /// O(n²) all-pairs scan (#116). Each grid cell is sized so that BOTH its north-south and
+    /// east-west extent are ≥ <see cref="GameConstants.LoopClosureDistanceMeters"/> everywhere on
+    /// the path: cell height is fixed at the closure distance, and cell width uses the path's
+    /// maximum absolute latitude (where a degree of longitude is shortest, so cells are widest in
+    /// meters elsewhere). Because the north-south and east-west separations of any two points are
+    /// each ≤ their great-circle distance, two points within the closure radius differ by ≤ one
+    /// cell on each axis — so scanning a point's own cell plus its 8 neighbours is a guaranteed
+    /// superset of its within-radius partners. The caller applies the exact haversine test, so
+    /// results are identical to the brute-force scan.
+    /// </summary>
+    private sealed class ClosureSpatialIndex
+    {
+        private readonly Dictionary<(int, int), List<int>> _buckets;
+        private readonly double _degPerCellLat;
+        private readonly double _degPerCellLng;
+
+        private ClosureSpatialIndex(
+            Dictionary<(int, int), List<int>> buckets, double degPerCellLat, double degPerCellLng)
+        {
+            _buckets = buckets;
+            _degPerCellLat = degPerCellLat;
+            _degPerCellLng = degPerCellLng;
+        }
+
+        public static ClosureSpatialIndex Build(double[][] path)
+        {
+            var maxAbsLat = 0.0;
+            foreach (var p in path)
+                maxAbsLat = Math.Max(maxAbsLat, Math.Abs(p[0]));
+
+            var degPerCellLat = GameConstants.LoopClosureDistanceMeters / GameConstants.MetersPerDegreeLat;
+            // Clamp cos away from 0 so a (degenerate) near-polar path can't produce an infinite
+            // cell width; no real walk occurs there.
+            var cosLat = Math.Max(Math.Cos(maxAbsLat * Math.PI / 180.0), 0.01);
+            var degPerCellLng = GameConstants.LoopClosureDistanceMeters / (GameConstants.MetersPerDegreeLat * cosLat);
+
+            var buckets = new Dictionary<(int, int), List<int>>();
+            for (var i = 0; i < path.Length; i++)
+            {
+                var key = CellKey(path[i][0], path[i][1], degPerCellLat, degPerCellLng);
+                if (!buckets.TryGetValue(key, out var list))
+                {
+                    list = new List<int>();
+                    buckets[key] = list;
+                }
+                list.Add(i); // ascending index order preserved
+            }
+
+            return new ClosureSpatialIndex(buckets, degPerCellLat, degPerCellLng);
+        }
+
+        /// <summary>
+        /// Yields every point index in the query point's own cell and its 8 neighbours — a
+        /// superset of the points within the closure radius (never fewer).
+        /// </summary>
+        public IEnumerable<int> Candidates(double lat, double lng)
+        {
+            var (bx, by) = CellKey(lat, lng, _degPerCellLat, _degPerCellLng);
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    if (_buckets.TryGetValue((bx + dx, by + dy), out var list))
+                    {
+                        foreach (var idx in list)
+                            yield return idx;
+                    }
+                }
+            }
+        }
+
+        private static (int, int) CellKey(double lat, double lng, double degPerCellLat, double degPerCellLng)
+            => ((int)Math.Floor(lat / degPerCellLat), (int)Math.Floor(lng / degPerCellLng));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
