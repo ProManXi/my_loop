@@ -64,4 +64,12 @@ public interface IHexGridService
     /// Returns the center neighborhood + ring-k neighbors.
     /// </summary>
     List<long> GetNearbyNeighborhoods(double lat, double lng, int k = 1);
+
+    /// <summary>
+    /// True only if <paramref name="regionId"/> is the decimal encoding of a valid H3 cell
+    /// at the region (res-3) resolution — i.e. exactly the identifiers the server broadcasts
+    /// to. Used to gate SignalR region subscriptions so a caller cannot join an arbitrary
+    /// group name (e.g. a "user_{guid}" personal group).
+    /// </summary>
+    bool IsValidRegionId(string regionId);
 }

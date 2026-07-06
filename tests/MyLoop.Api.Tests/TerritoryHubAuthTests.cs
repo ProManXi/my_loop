@@ -21,7 +21,8 @@ public class TerritoryHubAuthTests
         new() { Id = id, FirebaseUid = "uid_robin", DisplayName = "Robin", Color = "#FF0000" };
 
     private static TerritoryHub BuildHub(
-        string? firebaseUid, User? resolvedUser, Mock<IGroupManager> groups)
+        string? firebaseUid, User? resolvedUser, Mock<IGroupManager> groups,
+        Mock<IHexGridService>? hexGrid = null)
     {
         var users = new Mock<IUserService>();
         if (firebaseUid != null)
@@ -37,7 +38,7 @@ public class TerritoryHubAuthTests
         ctx.SetupGet(c => c.User).Returns(principal);
         ctx.SetupGet(c => c.ConnectionId).Returns("conn-1");
 
-        return new TerritoryHub(users.Object, NullLogger<TerritoryHub>.Instance)
+        return new TerritoryHub(users.Object, (hexGrid ?? new Mock<IHexGridService>()).Object, NullLogger<TerritoryHub>.Instance)
         {
             Context = ctx.Object,
             Groups = groups.Object,
@@ -77,6 +78,53 @@ public class TerritoryHubAuthTests
         var hub = BuildHub(firebaseUid: null, resolvedUser: null, groups);
 
         await Assert.ThrowsAsync<HubException>(() => hub.JoinUserGroup(Guid.NewGuid().ToString()));
+
+        groups.Verify(g => g.AddToGroupAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task JoinRegion_with_valid_region_id_subscribes()
+    {
+        const string regionId = "590686918550487039"; // a res-3 H3 cell id
+        var groups = new Mock<IGroupManager>();
+        var hexGrid = new Mock<IHexGridService>();
+        hexGrid.Setup(h => h.IsValidRegionId(regionId)).Returns(true);
+        var hub = BuildHub("uid_robin", UserWithId(Guid.NewGuid()), groups, hexGrid);
+
+        await hub.JoinRegion(regionId);
+
+        groups.Verify(g => g.AddToGroupAsync("conn-1", regionId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task JoinRegion_rejects_a_personal_group_name()
+    {
+        // The attack: subscribe to another user's private delta group via JoinRegion.
+        var personalGroup = $"user_{Guid.NewGuid()}";
+        var groups = new Mock<IGroupManager>();
+        var hexGrid = new Mock<IHexGridService>();
+        hexGrid.Setup(h => h.IsValidRegionId(personalGroup)).Returns(false);
+        var hub = BuildHub("uid_robin", UserWithId(Guid.NewGuid()), groups, hexGrid);
+
+        await Assert.ThrowsAsync<HubException>(() => hub.JoinRegion(personalGroup));
+
+        groups.Verify(g => g.AddToGroupAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task JoinRegion_rejects_a_non_region_h3_cell_id()
+    {
+        // A syntactically-numeric id that is not a res-3 region (e.g. a res-11 cell) must
+        // still be rejected — regions are exactly the ids the server broadcasts to.
+        const string res11Cell = "639000000000000000";
+        var groups = new Mock<IGroupManager>();
+        var hexGrid = new Mock<IHexGridService>();
+        hexGrid.Setup(h => h.IsValidRegionId(res11Cell)).Returns(false);
+        var hub = BuildHub("uid_robin", UserWithId(Guid.NewGuid()), groups, hexGrid);
+
+        await Assert.ThrowsAsync<HubException>(() => hub.JoinRegion(res11Cell));
 
         groups.Verify(g => g.AddToGroupAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
