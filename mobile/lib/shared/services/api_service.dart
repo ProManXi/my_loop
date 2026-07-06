@@ -391,7 +391,7 @@ class ApiService {
   Future<void> registerDeviceToken({required String userId, required String token}) async {
     await _dio.post('/api/users/$userId/device-token', data: {
       'token': token,
-      'platform': 'ios',
+      'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
     });
   }
 
