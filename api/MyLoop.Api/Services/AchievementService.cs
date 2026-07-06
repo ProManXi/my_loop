@@ -86,8 +86,7 @@ public class AchievementService : IAchievementService
                     XpAwarded = def.XpReward,
                 });
 
-                user.TotalXp += def.XpReward;
-                user.Level = GameConstants.LevelFromXp(user.TotalXp);
+                XpLedger.Grant(user, def.XpReward);
 
                 newUnlocks.Add(new AchievementUnlock
                 {
