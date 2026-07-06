@@ -104,8 +104,13 @@ public static class GameConstants
     public const int MaxUserTerritoryCells = 2000;
     public const int MaxPreviewPathLength = 10_000;
 
-    /// <summary>Hard cap on GPS points accepted in a single claim/trail submission (DoS guard).</summary>
-    public const int MaxClaimPathPoints = 50_000;
+    /// <summary>
+    /// Hard cap on GPS points accepted in a single claim/trail submission (DoS guard).
+    /// Sized to a walking-realistic ceiling: 6 h × 1 point / 5 s ≈ 4,320, rounded to 6,000.
+    /// No legitimate walk exceeds this; larger submissions are rejected 400 (see
+    /// ClaimsController). Bounds the loop-closure spatial scan (#116 / ML-ERR-019).
+    /// </summary>
+    public const int MaxClaimPathPoints = 6_000;
 
     // --- GPS / Geolocation ---
     public const double EarthRadiusMeters = 6_371_000.0;
