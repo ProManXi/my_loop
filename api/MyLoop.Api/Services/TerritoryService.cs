@@ -567,11 +567,11 @@ public class TerritoryService : ITerritoryService
                 OwnerName = t.Owner!.DisplayName,
                 t.CooldownExpiresAt,
                 t.ParentCellId,
-                t.LastRefreshedAt
+                t.LastRefreshedAt,
+                t.DecayDays
             })
             .ToListAsync();
 
-        var decaySeconds = GameConstants.DecayDays * 86400.0;
         return filtered.Select(t => new TerritoryCellResponse
         {
             CellId = t.CellId,
@@ -581,9 +581,19 @@ public class TerritoryService : ITerritoryService
             OwnerName = t.OwnerName,
             CooldownExpiresAtUtc = t.CooldownExpiresAt,
             ParentCellId = t.ParentCellId,
-            DecayProgress = Math.Clamp(
-                (DateTime.UtcNow - t.LastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0),
+            DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
         }).ToList();
+    }
+
+    /// <summary>
+    /// Fraction of a cell's OWN decay window elapsed since its last refresh (0..1). Each cell
+    /// carries its capture-time DecayDays (7–90 by home distance) — using the global default
+    /// here made every slow-decay cell render fully decayed after 7 days (#105).
+    /// </summary>
+    private static double ComputeDecayProgress(DateTime lastRefreshedAt, int decayDays)
+    {
+        var decaySeconds = decayDays * 86400.0;
+        return Math.Clamp((DateTime.UtcNow - lastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0);
     }
 
     public async Task<TerritoryStatsResponse> GetUserStats(Guid userId)
@@ -671,11 +681,11 @@ public class TerritoryService : ITerritoryService
                 OwnerName = t.Owner!.DisplayName,
                 t.CooldownExpiresAt,
                 t.ParentCellId,
-                t.LastRefreshedAt
+                t.LastRefreshedAt,
+                t.DecayDays
             })
             .ToListAsync();
 
-        var decaySeconds = GameConstants.DecayDays * 86400.0;
         return cells.Select(t => new TerritoryCellResponse
         {
             CellId = t.CellId,
@@ -685,8 +695,7 @@ public class TerritoryService : ITerritoryService
             OwnerName = t.OwnerName,
             CooldownExpiresAtUtc = t.CooldownExpiresAt,
             ParentCellId = t.ParentCellId,
-            DecayProgress = Math.Clamp(
-                (DateTime.UtcNow - t.LastRefreshedAt).TotalSeconds / decaySeconds, 0.0, 1.0),
+            DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
         }).ToList();
     }
 
