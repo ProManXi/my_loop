@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:myloop/app/router.dart';
+import 'package:myloop/app/router_guards.dart';
 import 'package:myloop/features/profile/user_profile_screen.dart';
 
 /// Router guards for #130 (ML-ERR-033):
