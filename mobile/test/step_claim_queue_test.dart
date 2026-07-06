@@ -102,6 +102,40 @@ void main() {
     expect(reopened.isEmpty, isTrue);
   });
 
+  // #13: the WAL path is process-wide, not per-user. On sign-out the persisted queue MUST
+  // be wiped, or the next user's queue re-reads it on init() and the drainer POSTs the
+  // previous user's un-synced GPS points under the new session — mis-attributing territory.
+  // clearPersisted() is the static, no-live-instance-needed hook the sign-out flow calls.
+  test('clearPersisted wipes the WAL so the next user starts empty', () async {
+    // User A leaves points un-drained on disk, then their live instance goes away
+    // (journey controller disposed) WITHOUT clearing — only the sign-out hook does.
+    final userA = StepClaimQueue();
+    await userA.init();
+    await userA.enqueue(_pt('a1', session: 'A-walk'));
+    await userA.enqueue(_pt('a2', session: 'A-walk'));
+
+    // Sign-out hook.
+    await StepClaimQueue.clearPersisted();
+
+    // The WAL file itself is gone, and a fresh queue (user B) reads nothing from disk.
+    expect(await File('${tmp.path}/step_claim_queue.jsonl').exists(), isFalse);
+    final userB = StepClaimQueue();
+    await userB.init();
+    expect(userB.isEmpty, isTrue,
+        reason: "user B must not inherit user A's queued GPS points");
+  });
+
+  // clearPersisted also removes a leftover atomic-write temp file, so a crash mid-rewrite
+  // before sign-out can't leave A's data where a later reopen might observe it.
+  test('clearPersisted removes a leftover .tmp file too', () async {
+    final tmpWal = File('${tmp.path}/step_claim_queue.jsonl.tmp');
+    await tmpWal.writeAsString('{"clientId":"stale"}\n', flush: true);
+
+    await StepClaimQueue.clearPersisted();
+
+    expect(await tmpWal.exists(), isFalse);
+  });
+
   // Regression for the StepClaimQueue write-lock (PR #17): an [enqueue] append
   // must not interleave with a [removeProcessed]/[clear] rewrite. Pre-fix, the
   // rewrite snapshots the cache, the append lands on the file, then the
