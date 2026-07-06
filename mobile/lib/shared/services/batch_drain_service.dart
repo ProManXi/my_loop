@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
 import 'package:myloop/shared/services/api_service.dart';
@@ -34,6 +35,10 @@ class BatchDrainService {
   int _consecutiveFailures = 0;
   bool _disposed = false;
 
+  /// End of the current backoff window, or null when not backing off. Gates
+  /// timer/threshold drains (#119); `drainNow` bypasses it (explicit user action).
+  DateTime? _backoffUntil;
+
   /// Stream of batch results for UI updates.
   final _resultController = StreamController<BatchResult>.broadcast();
   Stream<BatchResult> get onBatchResult => _resultController.stream;
@@ -47,24 +52,35 @@ class BatchDrainService {
   int get queueSize => _queue.length;
 
   /// Whether we're currently in backoff (network issues).
-  bool get isInBackoff => _backoffSeconds > 0;
+  bool get isInBackoff =>
+      _backoffUntil != null && _now().isBefore(_backoffUntil!);
+
+  /// Clock source — injectable so backoff-window tests can control time.
+  final DateTime Function() _now;
 
   BatchDrainService({
     required StepClaimQueue queue,
     required ApiService api,
     required String userId,
+    DateTime Function() now = DateTime.now,
   })  : _queue = queue,
         _api = api,
-        _userId = userId;
+        _userId = userId,
+        _now = now;
 
   /// Start the periodic drain timer.
   void start() {
     _drainTimer?.cancel();
     _drainTimer = Timer.periodic(
       const Duration(seconds: _drainIntervalSeconds),
-      (_) => _tryDrain(),
+      (_) => drainTick(),
     );
   }
+
+  /// One periodic-timer drain attempt. Exposed so tests can drive the timer
+  /// path deterministically; production code should not call it directly.
+  @visibleForTesting
+  Future<bool> drainTick() => _tryDrain();
 
   /// Stop draining (e.g., when walk ends or on dispose).
   void stop() {
@@ -81,13 +97,17 @@ class BatchDrainService {
 
   /// Force an immediate drain (e.g., on STOP & CAPTURE before showing celebration).
   /// Returns true if drain succeeded (all points ACKed), false on failure.
+  /// Bypasses the failure backoff: the user explicitly asked, so attempt now.
   Future<bool> drainNow() async {
-    return await _tryDrain();
+    return await _tryDrain(force: true);
   }
 
   /// Attempt to drain the queue. Returns true if successful.
-  Future<bool> _tryDrain() async {
+  Future<bool> _tryDrain({bool force = false}) async {
     if (_draining || _disposed) return false;
+    // Honor the failure backoff for timer/threshold drains (#119) — before this
+    // gate the periodic timer retried every 10 s through the whole window.
+    if (!force && isInBackoff) return false;
     if (_queue.isEmpty) return true;
 
     _draining = true;
@@ -126,6 +146,7 @@ class BatchDrainService {
         // Reset backoff on success
         _backoffSeconds = 0;
         _consecutiveFailures = 0;
+        _backoffUntil = null;
 
         // Emit result for UI
         if (!_disposed) {
@@ -146,6 +167,7 @@ class BatchDrainService {
       }
       _backoffSeconds = 0;
       _consecutiveFailures = 0;
+      _backoffUntil = null;
       if (!_disposed) _rejectionController.add(e.message);
       return false;
     } on DioException catch (e) {
@@ -167,13 +189,9 @@ class BatchDrainService {
       _maxBackoffSeconds,
       pow(2, _consecutiveFailures).toInt(),
     );
-
-    // Schedule a retry after backoff period
-    if (!_disposed) {
-      Future.delayed(Duration(seconds: _backoffSeconds), () {
-        if (!_disposed) _tryDrain();
-      });
-    }
+    // No self-scheduled retry: the periodic timer keeps ticking and the gate
+    // in _tryDrain releases it once the window passes — one retry path, not two.
+    _backoffUntil = _now().add(Duration(seconds: _backoffSeconds));
   }
 
   void dispose() {
