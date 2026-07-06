@@ -391,7 +391,9 @@ class ApiService {
   Future<void> registerDeviceToken({required String userId, required String token}) async {
     await _dio.post('/api/users/$userId/device-token', data: {
       'token': token,
-      'platform': 'ios',
+      // FCM v1 builds platform-specific payloads (apns vs android blocks) from
+      // this field — a hardcoded value poisons every non-iOS row (#123).
+      'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
     });
   }
 
