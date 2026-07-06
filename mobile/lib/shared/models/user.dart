@@ -12,7 +12,6 @@ library;
 /// and other players visible on the leaderboard or territory map.
 class AppUser {
   final String id;
-  final String firebaseUid;
   final String displayName;
   final String color; // hex color like #FF5733
   final int avatarId;
@@ -23,7 +22,6 @@ class AppUser {
 
   const AppUser({
     required this.id,
-    required this.firebaseUid,
     required this.displayName,
     required this.color,
     required this.avatarId,
@@ -34,10 +32,13 @@ class AppUser {
   });
 
   /// Deserializes a user from a JSON map returned by the API.
+  ///
+  /// The server no longer returns `firebaseUid` or home coordinates in user payloads
+  /// (#100): the caller already knows its own Firebase UID from the auth session, and
+  /// other users' home locations are PII that is never exposed.
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
       id: json['id'] as String,
-      firebaseUid: json['firebaseUid'] as String,
       displayName: json['displayName'] as String,
       color: json['color'] as String,
       avatarId: (json['avatarId'] as num).toInt(),
@@ -51,7 +52,6 @@ class AppUser {
   /// Serializes this user to a JSON map for API requests.
   Map<String, dynamic> toJson() => {
     'id': id,
-    'firebaseUid': firebaseUid,
     'displayName': displayName,
     'color': color,
     'avatarId': avatarId,
