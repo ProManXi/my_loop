@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
 import 'package:myloop/shared/services/api_service.dart';
@@ -15,13 +16,16 @@ final _log = Logger('BatchDrain');
 ///
 /// - Timer-based: fires every [_drainIntervalSeconds] seconds.
 /// - Threshold-based: fires immediately when queue reaches [_batchThreshold].
-/// - Exponential backoff on failure: 1s → 2s → 4s → 8s → 16s → 30s max.
+/// - Exponential backoff on failure: 1s → 2s → 4s → 8s → 16s → 30s max. While a backoff
+///   window is open, timer ticks are gated (they early-return) rather than each firing a
+///   fresh network attempt, so the effective retry cadence honours the backoff (#119).
 /// - After successful drain, resets backoff and removes ACKed points from queue.
 /// - Emits [onBatchResult] stream for the journey controller to update UI.
 class BatchDrainService {
   final StepClaimQueue _queue;
   final ApiService _api;
   final String _userId;
+  final DateTime Function() _now;
 
   static const _drainIntervalSeconds = 10;
   static const _batchThreshold = 5;
@@ -30,8 +34,10 @@ class BatchDrainService {
 
   Timer? _drainTimer;
   bool _draining = false;
-  int _backoffSeconds = 0;
   int _consecutiveFailures = 0;
+  /// When set and still in the future, [_tryDrain] refuses to hit the network. The periodic
+  /// timer keeps ticking but is gated on this, so backoff is honoured without stacking retries.
+  DateTime? _backoffUntil;
   bool _disposed = false;
 
   /// Stream of batch results for UI updates.
@@ -46,16 +52,18 @@ class BatchDrainService {
   /// Current queue size (for UI indicators).
   int get queueSize => _queue.length;
 
-  /// Whether we're currently in backoff (network issues).
-  bool get isInBackoff => _backoffSeconds > 0;
+  /// Whether we're currently inside an open backoff window (network issues).
+  bool get isInBackoff => _backoffUntil != null && _now().isBefore(_backoffUntil!);
 
   BatchDrainService({
     required StepClaimQueue queue,
     required ApiService api,
     required String userId,
+    @visibleForTesting DateTime Function()? clock,
   })  : _queue = queue,
         _api = api,
-        _userId = userId;
+        _userId = userId,
+        _now = clock ?? DateTime.now;
 
   /// Start the periodic drain timer.
   void start() {
@@ -79,16 +87,34 @@ class BatchDrainService {
     }
   }
 
-  /// Force an immediate drain (e.g., on STOP & CAPTURE before showing celebration).
-  /// Returns true if drain succeeded (all points ACKed), false on failure.
+  /// Force an immediate, FULL drain (e.g., on STOP & CAPTURE before showing the celebration).
+  ///
+  /// A single [_tryDrain] only submits one ≤[_maxBatchSize]-point, single-session batch, so on
+  /// STOP & CAPTURE with more than that queued (a couple of dead-zone minutes of walking) the
+  /// loop claim would fire while trail points were still queued — the celebration under-reports
+  /// and the walk's Claim gets its remaining cells only on later cycles (#120). Here we loop
+  /// until the queue is empty, bounded by the number of batches the current queue implies (+2
+  /// slack) so a transient no-progress can't spin. Any failed batch aborts immediately, leaving
+  /// the remaining points intact for the next cycle. Returns true only if the queue fully drained.
   Future<bool> drainNow() async {
-    return await _tryDrain();
+    final maxAttempts = (_queue.length / _maxBatchSize).ceil() + 2;
+    var attempts = 0;
+    while (!_queue.isEmpty && attempts < maxAttempts) {
+      attempts++;
+      final ok = await _tryDrain();
+      if (!ok) return false;
+    }
+    return _queue.isEmpty;
   }
 
-  /// Attempt to drain the queue. Returns true if successful.
+  /// Attempt to drain one batch from the queue. Returns true if successful.
   Future<bool> _tryDrain() async {
     if (_draining || _disposed) return false;
     if (_queue.isEmpty) return true;
+    // Honour the backoff window: a timer tick (or drainNow retry) during backoff must not
+    // fire a fresh network request, or the effective retry cadence collapses to the timer
+    // period regardless of the computed backoff (#119).
+    if (_backoffUntil != null && _now().isBefore(_backoffUntil!)) return false;
 
     _draining = true;
     var peeked = const <QueuedStepPoint>[];
@@ -124,7 +150,7 @@ class BatchDrainService {
         await _queue.removeProcessed(ackedIds);
 
         // Reset backoff on success
-        _backoffSeconds = 0;
+        _backoffUntil = null;
         _consecutiveFailures = 0;
 
         // Emit result for UI
@@ -144,7 +170,7 @@ class BatchDrainService {
       if (peeked.isNotEmpty) {
         await _queue.removeProcessed(peeked.map((p) => p.clientId).toSet());
       }
-      _backoffSeconds = 0;
+      _backoffUntil = null;
       _consecutiveFailures = 0;
       if (!_disposed) _rejectionController.add(e.message);
       return false;
@@ -163,17 +189,15 @@ class BatchDrainService {
 
   void _handleFailure() {
     _consecutiveFailures++;
-    _backoffSeconds = min(
+    final backoffSeconds = min(
       _maxBackoffSeconds,
       pow(2, _consecutiveFailures).toInt(),
     );
-
-    // Schedule a retry after backoff period
-    if (!_disposed) {
-      Future.delayed(Duration(seconds: _backoffSeconds), () {
-        if (!_disposed) _tryDrain();
-      });
-    }
+    // Open a backoff window instead of self-scheduling a retry. The periodic timer (10s) already
+    // drives retries; it early-returns in _tryDrain until this window expires. Since the max
+    // backoff (30s) exceeds the timer period, retries quantize to the next tick after expiry —
+    // no stacked Future.delayed callbacks piling up during a long outage (#119).
+    _backoffUntil = _now().add(Duration(seconds: backoffSeconds));
   }
 
   void dispose() {
