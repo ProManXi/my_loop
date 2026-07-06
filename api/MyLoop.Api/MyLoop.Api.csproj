@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <!-- Expose internal (test-only) helpers on background services to the test assembly, so
-         decay/reconciliation SQL can be exercised directly without widening the public API. -->
+         decay/streak/reconciliation SQL can be exercised directly without widening the public API. -->
     <InternalsVisibleTo Include="MyLoop.Api.Tests" />
   </ItemGroup>
 

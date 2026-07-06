@@ -99,6 +99,18 @@ public static class GameConstants
     /// <summary>Total child cells at res-11 within one res-8 neighborhood hex (7^3 = 343).</summary>
     public const int CellsPerNeighborhood = 343;
 
+    // --- Streak ---
+    /// <summary>
+    /// Days of no claim (measured in UTC) after which the background job breaks a streak.
+    /// The claim path records LastClaimDate from the player's LOCAL date, clamped to UTC ±1 by
+    /// TerritoryService.ResolveStreakDate. A streak that is still alive in SOME timezone can
+    /// therefore have a LastClaimDate as old as (UTC today − 2). The UTC-only cleanup must not
+    /// break those, so it only breaks LastClaimDate &lt; (UTC today − this value). At 2, the job
+    /// never breaks a streak an honest local-date claim would still consider alive, and breaks it
+    /// once it is definitely dead in every timezone.
+    /// </summary>
+    public const int StreakBreakUtcGraceDays = 2;
+
     // --- Viewport / Query Limits ---
     public const int MaxViewportCells = 500;
     public const int MaxUserTerritoryCells = 2000;

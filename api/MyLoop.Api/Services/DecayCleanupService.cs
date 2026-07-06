@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MyLoop.Api.Constants;
 using MyLoop.Api.Data;
 
 namespace MyLoop.Api.Services;
@@ -57,19 +58,34 @@ public class DecayCleanupService : BackgroundService
             _logger.LogInformation("Decay cleanup: released {Count} cells", deleted);
         }
 
-        // Break streaks for users who didn't claim yesterday
-        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
-        var brokenStreaks = await db.Database.ExecuteSqlAsync($"""
+        var brokenStreaks = await BreakStaleStreaksAsync(db, GameConstants.StreakBreakUtcGraceDays, ct);
+        if (brokenStreaks > 0)
+        {
+            _logger.LogInformation("Streak cleanup: broke {Count} stale streaks", brokenStreaks);
+        }
+    }
+
+    /// <summary>
+    /// Breaks streaks that have gone stale — no claim for more than <paramref name="graceDays"/>
+    /// days measured in UTC. Returns the number of streaks broken.
+    ///
+    /// The grace exists because LastClaimDate is recorded from the player's LOCAL date (clamped to
+    /// UTC ±1 by <c>TerritoryService.ResolveStreakDate</c>), so a streak still alive in some
+    /// timezone can trail UTC by up to two days. Breaking at (UTC today − graceDays), with
+    /// graceDays = <see cref="GameConstants.StreakBreakUtcGraceDays"/>, never severs a streak an
+    /// honest local claim would keep, while still reaping ones that are dead in every timezone.
+    /// A broken streak is Streak = 0 / IsStreakActive = false; the next qualifying claim starts a
+    /// fresh streak of 1 via <c>TerritoryService.UpdateStreak</c>.
+    /// </summary>
+    internal static Task<int> BreakStaleStreaksAsync(AppDbContext db, int graceDays, CancellationToken ct)
+    {
+        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-graceDays);
+        return db.Database.ExecuteSqlAsync($"""
             UPDATE "Users"
             SET "IsStreakActive" = false, "Streak" = 0
             WHERE "IsStreakActive" = true
-              AND ("LastClaimDate" IS NULL OR "LastClaimDate" < {yesterday})
+              AND ("LastClaimDate" IS NULL OR "LastClaimDate" < {cutoff})
             """, ct);
-
-        if (brokenStreaks > 0)
-        {
-            _logger.LogInformation("Streak cleanup: broke {Count} inactive streaks", brokenStreaks);
-        }
     }
 
     /// <summary>
