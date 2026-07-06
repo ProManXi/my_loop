@@ -118,7 +118,7 @@ final router = GoRouter(
         // push tap. The old unconditional `state.extra as Map` threw and crashed
         // the route; validate every field and fall back to a recoverable screen.
         final screen = userProfileFromExtra(state.extra);
-        return screen ?? const _UnavailableProfileScreen();
+        return screen ?? const UnavailableProfileScreen();
       },
     ),
   ],
@@ -147,8 +147,8 @@ UserProfileScreen? userProfileFromExtra(Object? extra) {
 
 /// Shown when `/user-profile` is entered without the data it needs, instead of
 /// throwing. Lets the user navigate back rather than hitting a red error screen.
-class _UnavailableProfileScreen extends StatelessWidget {
-  const _UnavailableProfileScreen();
+class UnavailableProfileScreen extends StatelessWidget {
+  const UnavailableProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {

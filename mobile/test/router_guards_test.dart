@@ -1,10 +1,13 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:myloop/app/router.dart';
 import 'package:myloop/features/profile/user_profile_screen.dart';
 
 /// Router guards for #130 (ML-ERR-033):
 ///  - authRedirect fail-closes unauthenticated deep-links into protected routes.
 ///  - userProfileFromExtra never throws on missing/malformed `extra`.
+///  - the /user-profile route renders UnavailableProfileScreen instead of crashing.
 void main() {
   group('authRedirect', () {
     test('unauthenticated on a protected route is bounced to /login', () {
@@ -62,6 +65,35 @@ void main() {
     test('returns null when a field is the wrong type', () {
       final wrong = Map<String, dynamic>.from(validExtra)..['avatar'] = 'three';
       expect(userProfileFromExtra(wrong), isNull);
+    });
+  });
+
+  group('/user-profile route rendering', () {
+    // Reuses the app's real route logic (userProfileFromExtra + UnavailableProfileScreen)
+    // in a pumpable MaterialApp.router — the global `router` can't be pumped in a unit test
+    // because its redirect/refresh touch FirebaseAuth.instance.
+    GoRouter buildTestRouter() => GoRouter(
+          initialLocation: '/user-profile',
+          routes: [
+            GoRoute(
+              path: '/user-profile',
+              builder: (context, state) =>
+                  userProfileFromExtra(state.extra) ?? const UnavailableProfileScreen(),
+            ),
+          ],
+        );
+
+    testWidgets('renders the fallback when navigated without extra (no crash)', (tester) async {
+      await tester.pumpWidget(MaterialApp.router(routerConfig: buildTestRouter()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(UnavailableProfileScreen), findsOneWidget);
+      expect(find.text("This profile isn't available."), findsOneWidget);
+    });
+
+    testWidgets('renders UnavailableProfileScreen directly', (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: UnavailableProfileScreen()));
+      expect(find.text("This profile isn't available."), findsOneWidget);
     });
   });
 }
