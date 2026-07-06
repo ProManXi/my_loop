@@ -142,7 +142,6 @@ public static class GameConstants
     public const int MissionsPerDay = 3;
 
     /// <summary>XP threshold to reach a given level. Level 1 = 0 XP, Level 2 = 100 XP, Level 3 = 400 XP, Level 10 = 8100 XP.</summary>
-    /// <summary>XP threshold to reach a given level. Level 1 = 0 XP, Level 2 = 100 XP, Level 10 = 8100 XP.</summary>
     public static int XpForLevel(int level) => (level - 1) * (level - 1) * 100;
     public static int LevelFromXp(long xp)
     {
