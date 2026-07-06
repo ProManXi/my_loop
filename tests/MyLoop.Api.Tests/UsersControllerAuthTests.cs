@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MyLoop.Api.Controllers;
+using MyLoop.Api.Entities;
 using MyLoop.Api.Interfaces;
 using MyLoop.Api.Models;
 using Xunit;
@@ -72,5 +73,74 @@ public class UsersControllerAuthTests
 
         Assert.IsType<UnauthorizedResult>(result);
         users.Verify(u => u.DeleteAccount(It.IsAny<Guid>()), Times.Never);
+    }
+
+    // ── Register identity trust (#99 / ML-ERR-001) ──────────────────────────────
+
+    private static RegisterRequest ValidRegister(string? bodyUid) => new()
+    {
+        FirebaseUid = bodyUid,
+        DisplayName = "Robin",
+        Color = "#FF0000",
+        AvatarId = 1,
+    };
+
+    [Fact]
+    public async Task Register_uses_the_token_uid_and_ignores_the_body_uid()
+    {
+        var users = new Mock<IUserService>();
+        var push = new Mock<IPushNotificationService>();
+        var currentUser = new Mock<ICurrentUser>();
+        currentUser.SetupGet(c => c.FirebaseUid).Returns("verified_owner");
+        users.Setup(u => u.Register(It.IsAny<RegisterRequest>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new User { Id = Guid.NewGuid(), FirebaseUid = "verified_owner", DisplayName = "Robin", Color = "#FF0000" });
+
+        // The body tries to register a DIFFERENT (victim) uid.
+        var result = await Build(users, push, currentUser).Register(ValidRegister("victim_uid"));
+
+        Assert.IsType<CreatedResult>(result);
+        users.Verify(u => u.Register(It.IsAny<RegisterRequest>(), "verified_owner", It.IsAny<string>()), Times.Once);
+        users.Verify(u => u.Register(It.IsAny<RegisterRequest>(), "victim_uid", It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Register_with_a_real_uid_and_no_token_is_rejected_401()
+    {
+        var users = new Mock<IUserService>();
+        var push = new Mock<IPushNotificationService>();
+        var currentUser = new Mock<ICurrentUser>();
+        currentUser.SetupGet(c => c.FirebaseUid).Returns((string?)null); // no validated token
+
+        // The account-squatting attempt: an anonymous caller posting a victim's Firebase uid.
+        var result = await Build(users, push, currentUser).Register(ValidRegister("victim_firebase_uid"));
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+        users.Verify(u => u.Register(It.IsAny<RegisterRequest>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("local_abc")]
+    [InlineData("dev_abc")]
+    public async Task Register_local_account_without_token_mints_a_server_side_local_uid(string? bodyUid)
+    {
+        var users = new Mock<IUserService>();
+        var push = new Mock<IPushNotificationService>();
+        var currentUser = new Mock<ICurrentUser>();
+        currentUser.SetupGet(c => c.FirebaseUid).Returns((string?)null);
+        string? passedUid = null;
+        users.Setup(u => u.Register(It.IsAny<RegisterRequest>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<RegisterRequest, string, string>((_, uid, _) => passedUid = uid)
+            .ReturnsAsync(new User { Id = Guid.NewGuid(), FirebaseUid = "local", DisplayName = "Robin", Color = "#FF0000" });
+
+        var result = await Build(users, push, currentUser).Register(ValidRegister(bodyUid));
+
+        Assert.IsType<CreatedResult>(result);
+        // Server-minted, never the client's value, and provider forced to local.
+        Assert.NotNull(passedUid);
+        Assert.StartsWith("local_", passedUid);
+        Assert.NotEqual(bodyUid, passedUid);
+        users.Verify(u => u.Register(It.IsAny<RegisterRequest>(), It.IsAny<string>(), "local"), Times.Once);
     }
 }

@@ -71,10 +71,47 @@ public class UsersController : ControllerBase
         var avatarError = _validation.ValidateAvatarId(request.AvatarId);
         if (avatarError != null) return BadRequest(avatarError);
 
-        var user = await _userService.Register(request);
+        // Identity is derived ONLY from the validated Firebase token, never from the request body.
+        // The endpoint is [AllowAnonymous] so authentication (not authorization) still runs, so a
+        // genuine Sign-in-with-Apple/Google caller arrives with a validated token. Trusting the
+        // body's FirebaseUid instead let an anonymous caller pre-register a victim's known UID to
+        // squat the account, or — if it already existed — read the victim's record straight back
+        // (home coordinates are PII in a location game). See #99 / ML-ERR-001.
+        var verifiedUid = _currentUser.FirebaseUid;
+        string firebaseUid;
+        string authProvider;
+        if (!string.IsNullOrEmpty(verifiedUid))
+        {
+            firebaseUid = verifiedUid;
+            authProvider = request.AuthProvider ?? "firebase";
+        }
+        else if (IsLocalRegistration(request.FirebaseUid))
+        {
+            // No token: the offline/local account path. Mint the uid server-side so it can never
+            // collide with — or reveal — a real Firebase account.
+            firebaseUid = $"local_{Guid.NewGuid():N}";
+            authProvider = "local";
+        }
+        else
+        {
+            _logger.LogWarning("Rejected register: client supplied a Firebase UID with no validated token");
+            return Unauthorized("A Firebase account must be registered with a valid ID token.");
+        }
+
+        var user = await _userService.Register(request, firebaseUid, authProvider);
         _logger.LogInformation("New user registered: {UserId}", user.Id);
         return Created($"/api/users/{user.Id}", user);
     }
+
+    /// <summary>
+    /// True when the request represents a local/dev account (no Firebase identity): an absent uid
+    /// or one carrying the reserved local/dev prefixes. Any other client-supplied value is a
+    /// real-looking Firebase UID, which is only trustworthy from a validated token — not the body.
+    /// </summary>
+    private static bool IsLocalRegistration(string? claimedUid) =>
+        string.IsNullOrWhiteSpace(claimedUid)
+        || claimedUid.StartsWith("dev_", StringComparison.Ordinal)
+        || claimedUid.StartsWith("local_", StringComparison.Ordinal);
 
     /// <summary>
     /// Get a user by their internal ID.
