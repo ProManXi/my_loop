@@ -1,6 +1,9 @@
 ﻿/// MyLoop - Application Routing Configuration
 library;
 
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -28,9 +31,54 @@ CustomTransitionPage _noTransitionPage(Widget child, GoRouterState state, String
   );
 }
 
+/// Routes reachable without a signed-in session. Everything else is protected.
+///
+/// Onboarding routes (`/avatar`, `/set-home`) are intentionally NOT here: they are
+/// only reached once Firebase already has a session, so an *unauthenticated* caller
+/// deep-linking to them should still be bounced to `/login`.
+const _authRoutes = {'/login', '/local-signup'};
+
+/// Pure route guard (see [router]'s `redirect`). Returns the path to redirect to,
+/// or `null` to allow the navigation.
+///
+/// Fail-closed: an unauthenticated caller may only sit on an auth route; any other
+/// target sends them to `/login`. Authenticated callers are never redirected away
+/// from `/login` here — the login screen performs the session bootstrap (profile
+/// load, slice hydration, SignalR connect, push init) and then navigates onward
+/// itself, so short-circuiting it would launch the app with unhydrated state.
+///
+/// Offline is handled implicitly: Firebase restores the session from disk with no
+/// network, so [isAuthenticated] is true offline and a cached user is not bounced.
+String? authRedirect({required bool isAuthenticated, required String location}) {
+  if (!isAuthenticated && !_authRoutes.contains(location)) return '/login';
+  return null;
+}
+
+/// A [Listenable] that fires whenever Firebase auth state changes, so the router
+/// re-evaluates [authRedirect] on sign-in/sign-out (e.g. bouncing to `/login` the
+/// moment the user signs out).
+class _AuthRefreshListenable extends ChangeNotifier {
+  _AuthRefreshListenable(Stream<User?> stream) {
+    _sub = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<User?> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
 /// The global router instance.
 final router = GoRouter(
   initialLocation: '/login',
+  refreshListenable: _AuthRefreshListenable(FirebaseAuth.instance.authStateChanges()),
+  redirect: (context, state) => authRedirect(
+    isAuthenticated: FirebaseAuth.instance.currentUser != null,
+    location: state.matchedLocation,
+  ),
   routes: [
     GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
     GoRoute(path: '/local-signup', builder: (context, state) => const LocalSignupScreen()),
@@ -66,15 +114,47 @@ final router = GoRouter(
     GoRoute(
       path: '/user-profile',
       builder: (context, state) {
-        final extra = state.extra as Map<String, dynamic>;
-        return UserProfileScreen(
-          userId: extra['userId'] as String,
-          name: extra['name'] as String,
-          avatarId: extra['avatar'] as int,
-          color: extra['color'] as String,
-          rank: extra['rank'] as int,
-        );
+        // extra is caller-supplied and absent on a cold deep-link or a malformed
+        // push tap. The old unconditional `state.extra as Map` threw and crashed
+        // the route; validate every field and fall back to a recoverable screen.
+        final screen = userProfileFromExtra(state.extra);
+        return screen ?? const _UnavailableProfileScreen();
       },
     ),
   ],
 );
+
+/// Builds a [UserProfileScreen] from route `extra`, or `null` when `extra` is
+/// missing or any required field is absent/mistyped.
+UserProfileScreen? userProfileFromExtra(Object? extra) {
+  if (extra is! Map<String, dynamic>) return null;
+  final userId = extra['userId'];
+  final name = extra['name'];
+  final avatarId = extra['avatar'];
+  final color = extra['color'];
+  final rank = extra['rank'];
+  if (userId is! String || name is! String || avatarId is! int || color is! String || rank is! int) {
+    return null;
+  }
+  return UserProfileScreen(
+    userId: userId,
+    name: name,
+    avatarId: avatarId,
+    color: color,
+    rank: rank,
+  );
+}
+
+/// Shown when `/user-profile` is entered without the data it needs, instead of
+/// throwing. Lets the user navigate back rather than hitting a red error screen.
+class _UnavailableProfileScreen extends StatelessWidget {
+  const _UnavailableProfileScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Profile')),
+      body: const Center(child: Text("This profile isn't available.")),
+    );
+  }
+}
