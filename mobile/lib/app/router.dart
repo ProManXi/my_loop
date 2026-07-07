@@ -1,9 +1,13 @@
 ﻿/// MyLoop - Application Routing Configuration
 library;
 
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:myloop/app/router_guards.dart';
 import 'package:myloop/features/dev/mock_walk_screen.dart';
 import 'package:myloop/features/auth/login_screen.dart';
 import 'package:myloop/features/auth/avatar_picker_screen.dart';
@@ -15,7 +19,6 @@ import 'package:myloop/features/journey/journey_screen.dart';
 import 'package:myloop/features/leaderboard/leaderboard_screen.dart';
 import 'package:myloop/features/achievements/achievements_screen.dart';
 import 'package:myloop/features/profile/profile_screen.dart';
-import 'package:myloop/features/profile/user_profile_screen.dart';
 import 'package:myloop/features/history/walk_history_screen.dart';
 import 'package:myloop/features/notifications/notifications_screen.dart';
 
@@ -28,9 +31,31 @@ CustomTransitionPage _noTransitionPage(Widget child, GoRouterState state, String
   );
 }
 
+/// A [Listenable] that fires whenever Firebase auth state changes, so the router
+/// re-evaluates [authRedirect] on sign-in/sign-out (e.g. bouncing to `/login` the
+/// moment the user signs out).
+class _AuthRefreshListenable extends ChangeNotifier {
+  _AuthRefreshListenable(Stream<User?> stream) {
+    _sub = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<User?> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
 /// The global router instance.
 final router = GoRouter(
   initialLocation: '/login',
+  refreshListenable: _AuthRefreshListenable(FirebaseAuth.instance.authStateChanges()),
+  redirect: (context, state) => authRedirect(
+    isAuthenticated: FirebaseAuth.instance.currentUser != null,
+    location: state.matchedLocation,
+  ),
   routes: [
     GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
     GoRoute(path: '/local-signup', builder: (context, state) => const LocalSignupScreen()),
@@ -66,14 +91,11 @@ final router = GoRouter(
     GoRoute(
       path: '/user-profile',
       builder: (context, state) {
-        final extra = state.extra as Map<String, dynamic>;
-        return UserProfileScreen(
-          userId: extra['userId'] as String,
-          name: extra['name'] as String,
-          avatarId: extra['avatar'] as int,
-          color: extra['color'] as String,
-          rank: extra['rank'] as int,
-        );
+        // extra is caller-supplied and absent on a cold deep-link or a malformed
+        // push tap. The old unconditional `state.extra as Map` threw and crashed
+        // the route; validate every field and fall back to a recoverable screen.
+        final screen = userProfileFromExtra(state.extra);
+        return screen ?? const UnavailableProfileScreen();
       },
     ),
   ],
