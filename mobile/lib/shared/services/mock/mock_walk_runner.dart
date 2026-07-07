@@ -103,13 +103,15 @@ class MockWalkRunner {
     _lastFix = fix;
     _controller.add(_engine.toPosition(fix, DateTime.now(), speedMps: _paused ? 0.0 : _speedMps));
     if (!_finished) {
-      _listener?.reportFix(walkedMeters: _walkedMeters, paused: _paused, speedMps: _speedMps);
+      _listener?.reportFix(this,
+          walkedMeters: _walkedMeters, paused: _paused, speedMps: _speedMps);
     }
   }
 
   void _report() {
     if (_finished) return;
-    _listener?.reportControl(walkedMeters: _walkedMeters, paused: _paused, speedMps: _speedMps);
+    _listener?.reportControl(this,
+        walkedMeters: _walkedMeters, paused: _paused, speedMps: _speedMps);
   }
 
   void _finish() {

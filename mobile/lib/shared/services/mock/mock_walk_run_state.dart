@@ -93,21 +93,25 @@ class MockWalkRunNotifier extends Notifier<MockWalkRunState> {
     );
   }
 
-  /// Record one emitted fix.
-  void reportFix({required double walkedMeters, required bool paused, required double speedMps}) =>
-      _update(walkedMeters: walkedMeters, paused: paused, speedMps: speedMps, emittedDelta: 1);
+  /// Record one emitted fix. Identity-guarded like [finish]: a leaked stale
+  /// runner ticking late must not flip-flop a newer run's HUD.
+  void reportFix(MockWalkRunner runner,
+          {required double walkedMeters, required bool paused, required double speedMps}) =>
+      _update(runner, walkedMeters: walkedMeters, paused: paused, speedMps: speedMps, emittedDelta: 1);
 
   /// Record a pause/resume/speed change (no fix emitted).
-  void reportControl({required double walkedMeters, required bool paused, required double speedMps}) =>
-      _update(walkedMeters: walkedMeters, paused: paused, speedMps: speedMps, emittedDelta: 0);
+  void reportControl(MockWalkRunner runner,
+          {required double walkedMeters, required bool paused, required double speedMps}) =>
+      _update(runner, walkedMeters: walkedMeters, paused: paused, speedMps: speedMps, emittedDelta: 0);
 
-  void _update({
+  void _update(
+    MockWalkRunner runner, {
     required double walkedMeters,
     required bool paused,
     required double speedMps,
     required int emittedDelta,
   }) {
-    if (state.finished) return;
+    if (!identical(_runner, runner) || state.finished) return;
     state = MockWalkRunState(
       totalMeters: state.totalMeters,
       walkedMeters: walkedMeters,

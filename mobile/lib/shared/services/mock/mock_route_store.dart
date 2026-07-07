@@ -127,14 +127,30 @@ class MockRouteLibraryNotifier extends AsyncNotifier<MockRouteLibrary> {
   @override
   Future<MockRouteLibrary> build() => MockRouteStore.load();
 
-  MockRouteLibrary get _current => state.value ?? MockRouteLibrary.empty;
+  /// Waits out the initial disk load if it is still in flight — otherwise the
+  /// load completing would overwrite a mutation's state and the next write
+  /// would persist the pre-mutation library. A failed load degrades to empty.
+  Future<void> _ensureLoaded() async {
+    if (state.value != null) return;
+    try {
+      await future;
+    } catch (_) {
+      // build() already degrades a failed load to the empty library.
+    }
+  }
+
+  /// Live state read. Must be called AFTER [_ensureLoaded] and with no await
+  /// between this read and the [_replace] write: the read-modify-write has to
+  /// be atomic within one event-loop turn or concurrent mutations lose updates.
+  MockRouteLibrary get _currentSync => state.value ?? MockRouteLibrary.empty;
 
   /// Adds (or overwrites, by exact name) a named route, newest first, capped at
   /// [MockRouteStore.maxSavedRoutes].
   Future<void> saveRoute(String name, MockWalkConfig config) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
-    final library = _current;
+    await _ensureLoaded();
+    final library = _currentSync;
     final kept = [
       SavedMockRoute(name: trimmed, savedAt: DateTime.now(), config: config),
       ...library.routes.where((r) => r.name != trimmed),
@@ -146,7 +162,8 @@ class MockRouteLibraryNotifier extends AsyncNotifier<MockRouteLibrary> {
   }
 
   Future<void> deleteRoute(String name) async {
-    final library = _current;
+    await _ensureLoaded();
+    final library = _currentSync;
     await _replace(MockRouteLibrary(
       routes: library.routes.where((r) => r.name != name).toList(),
       lastUsed: library.lastUsed,
@@ -155,7 +172,8 @@ class MockRouteLibraryNotifier extends AsyncNotifier<MockRouteLibrary> {
 
   /// Records the config of a walk the tester actually started.
   Future<void> setLastUsed(MockWalkConfig config) async {
-    await _replace(MockRouteLibrary(routes: _current.routes, lastUsed: config));
+    await _ensureLoaded();
+    await _replace(MockRouteLibrary(routes: _currentSync.routes, lastUsed: config));
   }
 
   Future<void> _replace(MockRouteLibrary library) async {

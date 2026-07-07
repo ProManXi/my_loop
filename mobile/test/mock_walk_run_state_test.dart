@@ -2,8 +2,8 @@
 /// source AND its control bridge to the live runner.
 ///
 /// Guards the graceful-failure contract: control taps with no live run are
-/// safe no-ops, a stale runner finishing late cannot clobber a newer run's
-/// attachment, and reporting after finish is ignored.
+/// safe no-ops, a stale runner reporting or finishing late cannot clobber a
+/// newer run (identity-guarded), and reporting after finish is ignored.
 library;
 
 import 'dart:math';
@@ -43,9 +43,9 @@ void main() {
   });
 
   test('begin resets a previous run and records the total', () {
-    final runner = _detachedRunner();
-    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: runner);
-    notifier().reportFix(walkedMeters: 50, paused: false, speedMps: 2.0);
+    final first = _detachedRunner();
+    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: first);
+    notifier().reportFix(first, walkedMeters: 50, paused: false, speedMps: 2.0);
     expect(state().emitted, 1);
 
     notifier().begin(totalMeters: 300, speedMps: 1.0, runner: _detachedRunner());
@@ -56,10 +56,11 @@ void main() {
   });
 
   test('fixes count toward emitted; control reports do not', () {
-    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: _detachedRunner());
-    notifier().reportFix(walkedMeters: 2, paused: false, speedMps: 2.0);
-    notifier().reportControl(walkedMeters: 2, paused: true, speedMps: 2.0);
-    notifier().reportControl(walkedMeters: 2, paused: true, speedMps: 3.0);
+    final runner = _detachedRunner();
+    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: runner);
+    notifier().reportFix(runner, walkedMeters: 2, paused: false, speedMps: 2.0);
+    notifier().reportControl(runner, walkedMeters: 2, paused: true, speedMps: 2.0);
+    notifier().reportControl(runner, walkedMeters: 2, paused: true, speedMps: 3.0);
 
     expect(state().emitted, 1);
     expect(state().paused, isTrue);
@@ -67,8 +68,9 @@ void main() {
   });
 
   test('fraction and eta are distance-based at the current speed', () {
-    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: _detachedRunner());
-    notifier().reportFix(walkedMeters: 50, paused: false, speedMps: 2.0);
+    final runner = _detachedRunner();
+    notifier().begin(totalMeters: 200, speedMps: 2.0, runner: runner);
+    notifier().reportFix(runner, walkedMeters: 50, paused: false, speedMps: 2.0);
 
     expect(state().fraction, 0.25);
     expect(state().eta, const Duration(seconds: 75)); // 150 m left at 2 m/s
@@ -78,7 +80,7 @@ void main() {
     final runner = _detachedRunner();
     notifier().begin(totalMeters: 200, speedMps: 2.0, runner: runner);
     notifier().finish(runner);
-    notifier().reportFix(walkedMeters: 100, paused: false, speedMps: 2.0);
+    notifier().reportFix(runner, walkedMeters: 100, paused: false, speedMps: 2.0);
 
     expect(state().finished, isTrue);
     expect(state().walkedMeters, 0);
@@ -93,19 +95,23 @@ void main() {
     }, returnsNormally);
   });
 
-  test('a stale runner finishing late neither detaches nor finishes the newer run', () {
+  test('a stale runner reporting or finishing late cannot touch the newer run', () {
     final stale = _detachedRunner();
     notifier().begin(totalMeters: 100, speedMps: 2.0, runner: stale);
 
     final fresh = _detachedRunner();
     notifier().begin(totalMeters: 100, speedMps: 2.0, runner: fresh);
-    notifier().finish(stale); // late teardown of the old run — must be ignored
 
+    // Late ticks and teardown from the leaked old runner — all ignored.
+    notifier().reportFix(stale, walkedMeters: 99, paused: false, speedMps: 4.0);
+    notifier().finish(stale);
+    expect(state().walkedMeters, 0);
     expect(state().finished, isFalse);
-    notifier().reportFix(walkedMeters: 10, paused: false, speedMps: 2.0);
-    expect(state().walkedMeters, 10); // fresh run still live and reporting
 
-    notifier().finish(fresh); // the real owner can still finish it
+    // The live runner still reports and finishes normally.
+    notifier().reportFix(fresh, walkedMeters: 10, paused: false, speedMps: 2.0);
+    expect(state().walkedMeters, 10);
+    notifier().finish(fresh);
     expect(state().finished, isTrue);
   });
 

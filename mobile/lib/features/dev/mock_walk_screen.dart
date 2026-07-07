@@ -83,6 +83,9 @@ class _Strings {
       'Too short to claim — add roughly ${neededMeters.toStringAsFixed(0)} m of route.';
   static String savedAgo(DateTime at) {
     final d = DateTime.now().difference(at);
+    // A future savedAt (clock skew, hand-edited store file — the codec
+    // deliberately tolerates it) must not render "-4m ago".
+    if (d.isNegative) return 'just now';
     if (d.inDays > 0) return '${d.inDays}d ago';
     if (d.inHours > 0) return '${d.inHours}h ago';
     return '${d.inMinutes}m ago';
@@ -111,11 +114,9 @@ class _MockWalkScreenState extends ConsumerState<MockWalkScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _resolveInitialStart());
   }
 
-  MockWalkConfig get _config => ref.watch(mockWalkConfigProvider);
-
   @override
   Widget build(BuildContext context) {
-    final config = _config;
+    final config = ref.watch(mockWalkConfigProvider);
     final anchors = _previewAnchors(config);
 
     return Scaffold(
@@ -500,35 +501,40 @@ class _MockWalkScreenState extends ConsumerState<MockWalkScreen> {
 
   void _moveStart(LatLng point, {bool force = false}) {
     if (!mounted || (_userChoseStart && !force)) return;
-    _set(_config.copyWith(startPoint: point));
+    // ref.read, not watch — this runs from async chains, not build.
+    _set(ref.read(mockWalkConfigProvider).copyWith(startPoint: point));
     _mapController.move(point, 16);
   }
 
   Future<void> _promptSaveRoute(MockWalkConfig config) async {
     final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(_Strings.saveDialogTitle),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: _Strings.saveDialogHint),
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text(_Strings.saveDialogTitle),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: _Strings.saveDialogHint),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(_Strings.saveDialogCancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text(_Strings.saveDialogSave),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(_Strings.saveDialogCancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text(_Strings.saveDialogSave),
-          ),
-        ],
-      ),
-    );
-    if (name != null && name.trim().isNotEmpty) {
-      await ref.read(mockRouteLibraryProvider.notifier).saveRoute(name, config);
+      );
+      if (name != null && name.trim().isNotEmpty && mounted) {
+        await ref.read(mockRouteLibraryProvider.notifier).saveRoute(name, config);
+      }
+    } finally {
+      controller.dispose();
     }
   }
 
