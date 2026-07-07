@@ -88,18 +88,15 @@ public class TerritoryService : ITerritoryService
                 await _db.Database.ExecuteSqlRawAsync(
                     "SELECT pg_advisory_xact_lock({0})", BitConverter.ToInt64(userId.ToByteArray(), 0));
 
-                var todayStart = DateTime.UtcNow.Date;
                 // Resolve the session's Claim id first: this walk's batch-step drains may have
-                // already created the Claim earlier today, so exclude it from the per-day cap —
+                // already created the Claim earlier today, so it is excluded from the per-day cap —
                 // the cap counts distinct walks, not the batches/loop within one walk (#56).
                 var claimId = await ResolveSessionClaimId(userId, walkSessionId);
-                var todayClaimCount = await _db.Claims
-                    .CountAsync(c => c.UserId == userId && c.CreatedAt >= todayStart && c.Id != claimId);
-                if (todayClaimCount >= GameConstants.MaxClaimsPerDay)
+                if (await IsDailyClaimCapReached(userId, claimId))
                 {
                     await transaction.RollbackAsync();
                     return new TerritoryCommit<ClaimResult>(
-                        ClaimResult.Failure($"Daily limit reached — max {GameConstants.MaxClaimsPerDay} claims per day"),
+                        ClaimResult.Failure(DailyClaimCapMessage),
                         Pushed: false, [], [], null, null, 0, null, []);
                 }
 
@@ -276,6 +273,18 @@ public class TerritoryService : ITerritoryService
             // One walk = one Claim (#56): all of this walk's batch drains share the client's
             // walkSessionId, so they upsert the same Claim instead of each adding a row.
             var claimId = await ResolveSessionClaimId(userId, walkSessionId);
+
+            // Enforce the daily cap on the batch-step path too (#87). It was previously only on the
+            // loop path, so the primary claiming route was uncapped. Checked inside the transaction
+            // (mirroring ProcessClaim) and counting distinct walks/day — the session's own Claim is
+            // excluded, so multiple batches of THIS walk never count as separate claims.
+            if (await IsDailyClaimCapReached(userId, claimId))
+            {
+                await transaction.RollbackAsync();
+                return new TerritoryCommit<BatchStepClaimResponse>(
+                    new BatchStepClaimResponse { RejectionReason = DailyClaimCapMessage },
+                    Pushed: false, [], [], null, null, 0, null, []);
+            }
 
             // Aggregate state across batch
             var results = new List<BatchStepResult>(points.Count);
@@ -930,6 +939,26 @@ public class TerritoryService : ITerritoryService
     // key so all of a walk's captures fold into one Claim (and one Walk History row) instead
     // of fragmenting into one row per drained batch plus a loop row.
     // ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Rejection message shared by both claim paths when the daily cap is hit.</summary>
+    private static string DailyClaimCapMessage =>
+        $"Daily limit reached — max {GameConstants.MaxClaimsPerDay} claims per day";
+
+    /// <summary>
+    /// True when the user has already reached <see cref="GameConstants.MaxClaimsPerDay"/> distinct
+    /// walks today. One walk = one Claim (#56), so this counts today's Claims excluding this
+    /// session's own Claim — the loop and every batch drain of a single walk must not each count.
+    /// The single source of truth for the cap, shared by <c>ProcessClaim</c> and
+    /// <c>ProcessBatchStepClaim</c>; call inside the claim transaction so the count is consistent
+    /// with concurrent claims.
+    /// </summary>
+    private async Task<bool> IsDailyClaimCapReached(Guid userId, Guid sessionClaimId)
+    {
+        var todayStart = DateTime.UtcNow.Date;
+        var todayClaimCount = await _db.Claims
+            .CountAsync(c => c.UserId == userId && c.CreatedAt >= todayStart && c.Id != sessionClaimId);
+        return todayClaimCount >= GameConstants.MaxClaimsPerDay;
+    }
 
     /// <summary>
     /// Resolves the Claim id that should record this walk. Empty (older client) → a fresh id,

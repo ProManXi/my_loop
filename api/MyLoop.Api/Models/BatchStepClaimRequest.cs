@@ -55,6 +55,13 @@ public class BatchStepClaimResponse
 
     /// <summary>Achievements unlocked during this batch.</summary>
     public List<AchievementUnlockedDto> Achievements { get; set; } = [];
+
+    /// <summary>
+    /// Set when the batch was rejected by a business rule (e.g. the daily claim cap) rather than
+    /// processed. An internal service→controller signal: when non-null the controller returns a
+    /// 4xx with this message instead of 200, so a rejected batch is never serialized as a success.
+    /// </summary>
+    public string? RejectionReason { get; set; }
 }
 
 public class BatchStepResult
