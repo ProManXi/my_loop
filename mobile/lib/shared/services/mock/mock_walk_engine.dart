@@ -1,18 +1,19 @@
-/// MyLoop — Mock Walk Simulation: engine (#29)
+/// MyLoop — Mock Walk Simulation: engine (#29, reworked for #160)
 ///
-/// Turns a [MockWalkConfig] route into a synthetic but anti-cheat-valid stream of
-/// GPS [Position] fixes that look like a real human walk:
-///   • route is densified to ~1 fix/sec at the configured walking speed,
-///   • each fix gets Gaussian positional jitter so the path is not a spoof-smooth
-///     line (server rejects bearing std-dev < 2°),
-///   • fixes are emitted in real wall-clock time so the per-hop distance/elapsed
-///     speed stays under the server cap.
+/// Pure route geometry for the simulator. Turns a [MockWalkConfig] into:
+///   • ordered route anchors (loop polygon / straight leg / waypoint polyline,
+///     optionally auto-closed),
+///   • a total route length and a distance→point interpolator ([cleanPointAt])
+///     that [MockWalkRunner] paces in real time,
+///   • deterministic fixed-speed plots ([plotPoints]/[generatePositions]) that
+///     tests use to assert the anti-cheat invariants (bearing std-dev > 2°,
+///     per-hop speed under the server cap, retained-point density).
 ///
+/// Jitter uses a seeded [Random] when supplied, so a whole walk is reproducible.
 /// Geometry uses a local equirectangular approximation — accurate to centimetres
 /// over the sub-kilometre routes the simulator generates.
 library;
 
-import 'dart:async';
 import 'dart:math';
 
 import 'package:geolocator/geolocator.dart';
@@ -22,6 +23,10 @@ import 'mock_walk_config.dart';
 
 /// Metres per degree of latitude (WGS-84 mean). Longitude scales by cos(latitude).
 const double _metersPerDegLat = 111320.0;
+
+/// A waypoint route whose last tap lands within this distance of its first
+/// waypoint is already closed — auto-close appends nothing.
+const double _autoCloseSkipMeters = 10.0;
 
 /// One plotted step along the route: position + the heading used to reach it.
 class MockRoutePoint {
@@ -35,10 +40,11 @@ class MockWalkEngine {
   final MockWalkConfig config;
   final Random _random;
 
+  List<LatLng>? _anchors;
+  List<double>? _cumulativeMeters;
+
   /// Plotted route is computed once per engine and reused, so a one-shot fix
-  /// ([generatePositions]/[MockLocationService.getCurrentPosition]) and the live
-  /// [stream] share the SAME jittered points instead of re-rolling the RNG and
-  /// diverging. One [MockLocationService] owns one engine, so a single walk is
+  /// ([generatePositions]/[MockLocationService.getCurrentPosition]) stays
   /// internally consistent (and reproducible when a seeded [Random] is supplied).
   List<MockRoutePoint>? _plotted;
 
@@ -49,7 +55,9 @@ class MockWalkEngine {
   // ──────────────────────────────────────────────────────────────────────────
 
   /// Ordered vertices of the route, before densification. Always >= 2 points.
-  List<LatLng> buildRouteAnchors() {
+  List<LatLng> buildRouteAnchors() => _anchors ??= _computeAnchors();
+
+  List<LatLng> _computeAnchors() {
     switch (config.routeType) {
       case MockRouteType.loop:
         return _closedPolygon(
@@ -65,64 +73,110 @@ class MockWalkEngine {
         );
         return [config.startPoint, end];
       case MockRouteType.multiWaypoint:
-        if (config.waypoints.length >= 2) return List.of(config.waypoints);
-        // Degenerate config: fall back to a short straight leg so the run is valid.
-        final end = _offsetByBearing(
-          config.startPoint,
-          MockWalkConstants.defaultStraightBearingDegrees,
-          MockWalkConstants.defaultStraightLengthMeters,
-        );
-        return [config.startPoint, end];
+        if (config.waypoints.length < 2) {
+          // Degenerate config: fall back to a short straight leg so the run is valid.
+          final end = _offsetByBearing(
+            config.startPoint,
+            MockWalkConstants.defaultStraightBearingDegrees,
+            MockWalkConstants.defaultStraightLengthMeters,
+          );
+          return [config.startPoint, end];
+        }
+        final anchors = List.of(config.waypoints);
+        // Close the loop back to the first tap so the walk can claim territory,
+        // unless the tester already closed it (or opted out).
+        if (config.autoCloseLoop &&
+            _distance(anchors.last, anchors.first) > _autoCloseSkipMeters) {
+          anchors.add(anchors.first);
+        }
+        return anchors;
     }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Densify + jitter (deterministic given the seeded Random — used by tests)
+  // Distance parameterisation (used by the live runner)
   // ──────────────────────────────────────────────────────────────────────────
 
-  /// Walks the anchor polyline, emitting a jittered fix every [MockWalkConstants.tickInterval]
-  /// at [MockWalkConfig.speedMps]. Pure geometry — no timing — so it is unit-testable.
-  /// Memoized: computed once, then reused by both [generatePositions] and [stream].
+  /// Cumulative distance to each anchor, `[0, …, totalLengthMeters]`.
+  List<double> get _cumulative => _cumulativeMeters ??= _computeCumulative();
+
+  List<double> _computeCumulative() {
+    final anchors = buildRouteAnchors();
+    final cumulative = <double>[0];
+    for (var i = 1; i < anchors.length; i++) {
+      cumulative.add(cumulative.last + _distance(anchors[i - 1], anchors[i]));
+    }
+    return cumulative;
+  }
+
+  /// Full route length along the anchor polyline, in metres.
+  double get totalLengthMeters => _cumulative.last;
+
+  /// The un-jittered point [meters] along the route (clamped to its ends).
+  LatLng cleanPointAt(double meters) {
+    final anchors = buildRouteAnchors();
+    final cumulative = _cumulative;
+    final clamped = meters.clamp(0.0, totalLengthMeters);
+    for (var seg = 1; seg < anchors.length; seg++) {
+      if (clamped > cumulative[seg] && seg < anchors.length - 1) continue;
+      final segLength = cumulative[seg] - cumulative[seg - 1];
+      if (segLength <= 0) continue;
+      final frac = ((clamped - cumulative[seg - 1]) / segLength).clamp(0.0, 1.0);
+      final from = anchors[seg - 1];
+      final to = anchors[seg];
+      return LatLng(
+        from.latitude + (to.latitude - from.latitude) * frac,
+        from.longitude + (to.longitude - from.longitude) * frac,
+      );
+    }
+    return anchors.last;
+  }
+
+  /// Applies the configured Gaussian positional jitter to [point] (identity when
+  /// jitter is disabled). Consumes the engine's seeded [Random].
+  LatLng jitterPoint(LatLng point) {
+    if (!config.jitterEnabled) return point;
+    final north = _gaussian() * MockWalkConstants.jitterSigmaMeters;
+    final east = _gaussian() * MockWalkConstants.jitterSigmaMeters;
+    return _offsetMeters(point, north, east);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Fixed-speed plot (deterministic given the seeded Random — used by tests
+  // and the one-shot fix; the live stream is paced by MockWalkRunner instead)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Walks the route at the configured (fixed) speed, emitting a jittered fix per
+  /// [MockWalkConstants.tickInterval]. Pure geometry — no timing — so it is
+  /// unit-testable. Memoized: computed once per engine.
   List<MockRoutePoint> plotPoints() => _plotted ??= _computePlot();
 
   List<MockRoutePoint> _computePlot() {
-    final anchors = buildRouteAnchors();
     final stepMeters = config.speedMps * MockWalkConstants.tickInterval.inMilliseconds / 1000.0;
     final points = <MockRoutePoint>[];
 
-    // Emit the start fix.
-    final first = _jitter(anchors.first);
+    final first = jitterPoint(cleanPointAt(0));
     points.add(MockRoutePoint(first.latitude, first.longitude, 0.0));
 
-    for (var seg = 0; seg < anchors.length - 1; seg++) {
-      final from = anchors[seg];
-      final to = anchors[seg + 1];
-      final segLength = _distance(from, to);
-      if (segLength <= 0) continue;
-
-      // Step along this segment at the walking pace.
-      for (var travelled = stepMeters; travelled <= segLength; travelled += stepMeters) {
-        final frac = travelled / segLength;
-        final clean = LatLng(
-          from.latitude + (to.latitude - from.latitude) * frac,
-          from.longitude + (to.longitude - from.longitude) * frac,
-        );
-        final jittered = _jitter(clean);
-        final prev = points.last;
-        final heading = _bearing(prev.lat, prev.lng, jittered.latitude, jittered.longitude);
-        points.add(MockRoutePoint(jittered.latitude, jittered.longitude, heading));
-      }
+    for (var travelled = stepMeters; travelled < totalLengthMeters; travelled += stepMeters) {
+      _addJitteredFix(points, cleanPointAt(travelled));
     }
 
     // Guarantee the final anchor is represented (last partial step may fall short).
-    final lastAnchor = _jitter(anchors.last);
+    final last = jitterPoint(cleanPointAt(totalLengthMeters));
     final prev = points.last;
-    if (_distance(LatLng(prev.lat, prev.lng), lastAnchor) > 0.5) {
-      final heading = _bearing(prev.lat, prev.lng, lastAnchor.latitude, lastAnchor.longitude);
-      points.add(MockRoutePoint(lastAnchor.latitude, lastAnchor.longitude, heading));
+    if (_distance(LatLng(prev.lat, prev.lng), last) > 0.5) {
+      _addJitteredFix(points, last, alreadyJittered: true);
     }
 
     return points;
+  }
+
+  void _addJitteredFix(List<MockRoutePoint> points, LatLng clean, {bool alreadyJittered = false}) {
+    final fix = alreadyJittered ? clean : jitterPoint(clean);
+    final prev = points.last;
+    final heading = _bearing(prev.lat, prev.lng, fix.latitude, fix.longitude);
+    points.add(MockRoutePoint(fix.latitude, fix.longitude, heading));
   }
 
   /// Maps plotted points to [Position]s with timestamps spaced by the tick interval,
@@ -132,28 +186,12 @@ class MockWalkEngine {
     final tick = MockWalkConstants.tickInterval;
     return [
       for (var i = 0; i < plotted.length; i++)
-        _toPosition(plotted[i], startTime.add(tick * i)),
+        toPosition(plotted[i], startTime.add(tick * i), speedMps: config.speedMps),
     ];
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Live stream (real-time pacing)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /// Emits fixes in real wall-clock time, one per [MockWalkConstants.tickInterval],
-  /// timestamped at emission. Cancelling the subscription stops the walk.
-  Stream<Position> stream() async* {
-    for (final point in plotPoints()) {
-      yield _toPosition(point, DateTime.now());
-      await Future<void>.delayed(MockWalkConstants.tickInterval);
-    }
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Geometry helpers
-  // ──────────────────────────────────────────────────────────────────────────
-
-  Position _toPosition(MockRoutePoint p, DateTime timestamp) {
+  /// Builds the geolocator [Position] the journey pipeline consumes for a fix.
+  Position toPosition(MockRoutePoint p, DateTime timestamp, {required double speedMps}) {
     return Position(
       latitude: p.lat,
       longitude: p.lng,
@@ -163,18 +201,15 @@ class MockWalkEngine {
       altitudeAccuracy: 0,
       heading: p.headingDegrees,
       headingAccuracy: 0,
-      speed: config.speedMps,
+      speed: speedMps,
       speedAccuracy: 0,
       isMocked: true,
     );
   }
 
-  LatLng _jitter(LatLng point) {
-    if (!config.jitterEnabled) return point;
-    final north = _gaussian() * MockWalkConstants.jitterSigmaMeters;
-    final east = _gaussian() * MockWalkConstants.jitterSigmaMeters;
-    return _offsetMeters(point, north, east);
-  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // Geometry helpers
+  // ──────────────────────────────────────────────────────────────────────────
 
   /// Standard normal sample via the Box–Muller transform.
   double _gaussian() {

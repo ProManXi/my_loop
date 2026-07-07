@@ -70,6 +70,10 @@ dev_dependencies:
   path_provider_platform_interface: ^2.1.0
   plugin_platform_interface: ^2.1.0
 
+  # Used by test/mock_walk_runner_test.dart to drive the simulator's tick timers
+  # deterministically (transitive dep of flutter_test, declared for direct import).
+  fake_async: ^1.3.0
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
