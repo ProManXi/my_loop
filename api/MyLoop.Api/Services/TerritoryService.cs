@@ -139,7 +139,10 @@ public class TerritoryService : ITerritoryService
                 missionResult = await _missionService.RecordProgress(userId, MissionType.CaptureHexes, newCells + stolenCells, gameDay);
             if (stolenCells > 0)
                 await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCells, gameDay);
-            await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, newCells + stolenCells, gameDay);
+            // CaptureInOneWalk is max-of-session (#108): pass the walk's cumulative captured total
+            // (this session's Claim, which already folds in the earlier batch-step trail), not just
+            // this loop's delta, so the mission reflects the whole walk.
+            await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, claim.CellCount, gameDay);
             // WalkDistance mission progress is recorded by the live batch-step path (#54),
             // not here, to avoid double-counting this walk's distance.
             if (newExplorations > 0)
@@ -398,11 +401,15 @@ public class TerritoryService : ITerritoryService
             // 5. Upsert the walk's single Claim (FK target for transfers, #56). CellCount
             // accumulates the net cells claimed across all of this walk's batches; AreaM2 is
             // derived from the canonical cell area, not the legacy 4234 literal.
+            // The claim is scoped to this block, so capture its cumulative count for the
+            // max-of-session CaptureInOneWalk mission recorded below (#108).
+            var walkCumulativeCells = 0;
             if (totalClaimedThisBatch > 0)
             {
                 var claim = await GetOrCreateSessionClaim(userId, claimId, pathPoints);
                 claim.CellCount += totalClaimedThisBatch;
                 claim.AreaM2 = claim.CellCount * GameConstants.CellAreaSquareMeters;
+                walkCumulativeCells = claim.CellCount;
 
                 // 6. Update user stats (atomic)
                 user.HexCount += totalClaimedThisBatch;
@@ -423,7 +430,9 @@ public class TerritoryService : ITerritoryService
                     userId, MissionType.CaptureHexes, totalClaimedThisBatch, gameDay);
                 if (stolenCellsCount > 0)
                     await _missionService.RecordProgress(userId, MissionType.StealHex, stolenCellsCount, gameDay);
-                await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, totalClaimedThisBatch, gameDay);
+                // Max-of-session (#108): the walk's cumulative captured total (persisted on the
+                // session Claim across this walk's batches), not just this batch's delta.
+                await _missionService.RecordProgress(userId, MissionType.CaptureInOneWalk, walkCumulativeCells, gameDay);
                 if (newExplorations > 0)
                     await _missionService.RecordProgress(userId, MissionType.ExploreNewArea, newExplorations, gameDay);
                 if (user.IsStreakActive)
