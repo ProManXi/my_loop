@@ -120,6 +120,13 @@ public class ClaimsController : ControllerBase
         {
             var result = await _territoryService.ProcessBatchStepClaim(
                 callerId.Value, request.LocalDate, request.Points, ParseWalkSessionId(request.WalkSessionId));
+
+            // A business-rule rejection (e.g. the daily claim cap, #87) is surfaced as a 4xx with
+            // the same { error } shape as the loop-claim and anti-cheat rejections the client
+            // already handles, rather than a 200 that looks like a successful (empty) batch.
+            if (result.RejectionReason != null)
+                return BadRequest(new { error = result.RejectionReason });
+
             return Ok(result);
         }
         catch (Exception ex)
