@@ -352,7 +352,7 @@ public class TerritoryService : ITerritoryService
                 }
 
                 var cellCenter = _hexGrid.GetCellCenter(cellId);
-                var decayDays = await CalculateDecayDays(user, cellCenter.Lat, cellCenter.Lng);
+                var decayDays = CalculateDecayDays(user, cellCenter.Lat, cellCenter.Lng);
 
                 string? previousOwnerName = null;
                 bool wasStolen;
@@ -1036,7 +1036,7 @@ public class TerritoryService : ITerritoryService
             var cellCenter = _hexGrid.GetCellCenter(hexCell.CellId);
 
             // Calculate per-cell decay based on geographic comparison
-            var cellDecayDays = await CalculateDecayDays(assignUser, cellCenter.Lat, cellCenter.Lng);
+            var cellDecayDays = CalculateDecayDays(assignUser, cellCenter.Lat, cellCenter.Lng);
 
             if (existingCells.TryGetValue(hexCell.CellId, out var existing))
             {
@@ -1117,36 +1117,23 @@ public class TerritoryService : ITerritoryService
     /// <summary>
     /// Calculates decay days for a hex at (lat, lng) relative to the user's home.
     /// - If user has no home set → default 7 days (they need to set home in onboarding).
-    /// - If within 30km of home → 7 days (skip geocoding, definitely same city).
-    /// - If farther → reverse-geocode and compare city/state/country/continent.
-    /// Geocoding results are cached per coordinate bucket so repeated nearby hexes are fast.
+    /// - Otherwise, a pure-distance ladder (no I/O) approximates the city/region/country/
+    ///   continent tiers. This intentionally does NOT reverse-geocode: it used to call
+    ///   GeocodingService per cell here, but that awaited an externally-throttled (1
+    ///   req/1.1s) Nominatim call while holding the per-user advisory lock inside the
+    ///   serializable claim transaction — a 60-cell batch could hold the transaction open
+    ///   for a minute and monopolize the app-wide geocoding throttle (ML-ERR-004).
     /// </summary>
-    private async Task<int> CalculateDecayDays(User? user, double hexLat, double hexLng)
+    private int CalculateDecayDays(User? user, double hexLat, double hexLng)
     {
         // No home set → use default (user hasn't completed onboarding)
         if (user == null || user.HomeLat == null || user.HomeLng == null)
             return GameConstants.DecayDays;
 
-        // Fast path: within 30km of home = definitely same city, no geocoding needed
         var distanceKm = _geo.HaversineMeters(
             user.HomeLat.Value, user.HomeLng.Value, hexLat, hexLng) / 1000.0;
 
-        if (distanceKm < GameConstants.SameCityDistanceKm)
-            return GameConstants.DecayDays;
-
-        // Far from home → geocode the hex location and compare against user's home
-        // GeocodingService caches results, so repeated calls for nearby hexes are free
-        var hexLocation = await _geocoding.GetLocationInfo(hexLat, hexLng);
-
-        if (hexLocation.IsEmpty)
-        {
-            // Geocoding failed — fall back to distance-based estimate
-            return GameConstants.GetDecayDaysForDistance(distanceKm);
-        }
-
-        return GameConstants.GetDecayDaysFromLocation(
-            user.HomeCity, user.HomeState, user.HomeCountry, user.HomeContinent,
-            hexLocation.City, hexLocation.State, hexLocation.Country, hexLocation.Continent);
+        return GameConstants.GetDecayDaysForDistance(distanceKm);
     }
 
     private async Task UpdateUserStats(Guid userId, List<CellTransfer> transfers)
