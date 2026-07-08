@@ -102,7 +102,12 @@ public class MissionService : IMissionService
 
         foreach (var mission in matchingMissions)
         {
-            mission.CurrentProgress += amount;
+            // CaptureInOneWalk is scored as the best SINGLE walk, so the caller passes that walk's
+            // cumulative captured total and we keep the maximum — several small walks must not add
+            // up to complete a "capture N in ONE walk" mission (#108). Every other type is additive.
+            mission.CurrentProgress = IsMaxOfSession(type)
+                ? Math.Max(mission.CurrentProgress, amount)
+                : mission.CurrentProgress + amount;
             if (mission.CurrentProgress >= mission.TargetValue && !mission.IsCompleted)
             {
                 mission.CompletedAt = DateTime.UtcNow;
@@ -137,6 +142,13 @@ public class MissionService : IMissionService
 
         return result;
     }
+
+    /// <summary>
+    /// CaptureInOneWalk is the only mission scored as the maximum of a single walk's total rather
+    /// than a running sum across the day (#108), so callers pass that walk's cumulative captured
+    /// count (its Claim.CellCount). Every other type accumulates additively.
+    /// </summary>
+    private static bool IsMaxOfSession(MissionType type) => type == MissionType.CaptureInOneWalk;
 
     /// <summary>
     /// Awards XP and saves all pending changes (hex claim + missions + XP) in one transaction.
