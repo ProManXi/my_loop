@@ -91,6 +91,19 @@ public class MissionService : IMissionService
 
         if (missions.Count == 0)
         {
+            // Callers batch several RecordProgress calls before one save, so an earlier call in
+            // this transaction may already hold the day's generated-but-unsaved set — the DB query
+            // can't see those Added entities, and regenerating (deterministic seed) would
+            // self-collide on the unique (UserId, Date, Type) index at save (#131).
+            missions = _db.ChangeTracker.Entries<DailyMission>()
+                .Where(e => e.State == EntityState.Added
+                            && e.Entity.UserId == userId && e.Entity.Date == today)
+                .Select(e => e.Entity)
+                .ToList();
+        }
+
+        if (missions.Count == 0)
+        {
             // Missions not yet generated (first claim of the day) — generate now
             var user = await _db.Users.FindAsync(userId);
             missions = GenerateAdaptiveMissions(userId, today, user);
@@ -244,8 +257,12 @@ public class MissionService : IMissionService
                 .Where(t => !usedTypes.Contains(t.Type))
                 .ToList();
 
+            // Diversity holds by construction: every tier's template pool has more distinct
+            // types than MissionsPerDay. A duplicate type would now violate the unique
+            // (UserId, Date, Type) index at save (#131), so fail loud instead of falling back.
             if (candidates.Count == 0)
-                candidates = templates; // Fallback if we exhaust unique types
+                throw new InvalidOperationException(
+                    $"Mission template pool has fewer than {GameConstants.MissionsPerDay} distinct types");
 
             var chosen = WeightedSelect(candidates, weights, rng);
             selected.Add(chosen);

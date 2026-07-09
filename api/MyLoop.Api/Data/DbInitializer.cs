@@ -147,9 +147,32 @@ public static class DbInitializer
                 ""Description"" text NOT NULL DEFAULT '',
                 CONSTRAINT ""PK_DailyMissions"" PRIMARY KEY (""Id"")
             )");
+        ApplyDailyMissionUniqueIndexPatch(db);
+    }
+
+    /// <summary>
+    /// One mission per type per user-day (#131). The old non-unique (UserId, Date) index let two
+    /// concurrent first-of-day generations both insert, yielding 6 missions and double XP surface.
+    /// Collapses any existing duplicates (keeping the row with the most progress, then the lowest
+    /// Id) before swapping the index, so the unique create can't fail. Idempotent — safe to run
+    /// on every startup and on fresh databases where EnsureCreated already built the unique index.
+    /// </summary>
+    internal static void ApplyDailyMissionUniqueIndexPatch(AppDbContext db)
+    {
         db.Database.ExecuteSqlRaw(@"
-            CREATE INDEX IF NOT EXISTS ""IX_DailyMissions_UserId_Date""
-            ON ""DailyMissions"" (""UserId"", ""Date"")");
+            DELETE FROM ""DailyMissions"" d
+            USING ""DailyMissions"" k
+            WHERE d.""UserId"" = k.""UserId""
+              AND d.""Date"" = k.""Date""
+              AND d.""Type"" = k.""Type""
+              AND d.""Id"" <> k.""Id""
+              AND (d.""CurrentProgress"" < k.""CurrentProgress""
+                   OR (d.""CurrentProgress"" = k.""CurrentProgress"" AND d.""Id"" > k.""Id""))");
+        db.Database.ExecuteSqlRaw(
+            @"DROP INDEX IF EXISTS ""IX_DailyMissions_UserId_Date""");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DailyMissions_UserId_Date_Type""
+            ON ""DailyMissions"" (""UserId"", ""Date"", ""Type"")");
     }
 
     private static void ApplyAchievementsSchema(AppDbContext db)
