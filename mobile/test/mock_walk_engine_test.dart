@@ -142,6 +142,76 @@ void main() {
         expect(nearest, lessThan(3 * MockWalkConstants.jitterSigmaMeters));
       }
     });
+
+    test('auto-close (default) walks back to the first waypoint so the loop can claim', () {
+      final anchors = engine(const MockWalkConfig(
+        routeType: MockRouteType.multiWaypoint,
+        waypoints: waypoints,
+      )).buildRouteAnchors();
+      expect(anchors.last, waypoints.first);
+
+      final kept = _retained(engine(const MockWalkConfig(
+        routeType: MockRouteType.multiWaypoint,
+        waypoints: waypoints,
+      )).plotPoints());
+      final d = Geolocator.distanceBetween(
+          kept.first.latitude, kept.first.longitude, kept.last.latitude, kept.last.longitude);
+      expect(d, lessThanOrEqualTo(_closureThresholdMeters));
+    });
+
+    test('autoCloseLoop: false leaves the tapped path open', () {
+      final anchors = engine(const MockWalkConfig(
+        routeType: MockRouteType.multiWaypoint,
+        waypoints: waypoints,
+        autoCloseLoop: false,
+      )).buildRouteAnchors();
+      expect(anchors.last, waypoints.last);
+    });
+
+    test('an already-closed tapped path is not double-closed', () {
+      final anchors = engine(const MockWalkConfig(
+        routeType: MockRouteType.multiWaypoint,
+        waypoints: [...waypoints, LatLng(37.4220, -122.0841)],
+      )).buildRouteAnchors();
+      expect(anchors, hasLength(4));
+    });
+  });
+
+  group('straight route bearing', () {
+    test('bearing 90° heads east of the start point', () {
+      final anchors = engine(const MockWalkConfig(
+        routeType: MockRouteType.straight,
+        startPoint: start,
+        straightBearingDegrees: 90,
+      )).buildRouteAnchors();
+      expect(anchors.last.longitude, greaterThan(start.longitude));
+      expect((anchors.last.latitude - start.latitude).abs(), lessThan(1e-4));
+    });
+  });
+
+  group('distance parameterisation (runner contract)', () {
+    final e = engine(const MockWalkConfig(
+      routeType: MockRouteType.straight,
+      startPoint: start,
+    ));
+
+    test('totalLengthMeters matches the configured route length', () {
+      expect(e.totalLengthMeters,
+          closeTo(MockWalkConstants.defaultStraightLengthMeters, 1.0));
+    });
+
+    test('cleanPointAt clamps to the route ends', () {
+      expect(e.cleanPointAt(-10), e.buildRouteAnchors().first);
+      expect(e.cleanPointAt(e.totalLengthMeters + 50), e.buildRouteAnchors().last);
+    });
+
+    test('cleanPointAt walks monotonically away from the start', () {
+      final origin = e.buildRouteAnchors().first;
+      double at(double m) => Geolocator.distanceBetween(origin.latitude,
+          origin.longitude, e.cleanPointAt(m).latitude, e.cleanPointAt(m).longitude);
+      expect(at(50), closeTo(50, 1.0));
+      expect(at(150), closeTo(150, 1.0));
+    });
   });
 
   group('slider extremes stay claimable', () {
