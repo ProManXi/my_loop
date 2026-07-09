@@ -23,6 +23,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:myloop/shared/services/game_state_cache.dart';
 import 'package:myloop/shared/services/notification_cache.dart';
 import 'package:myloop/shared/services/profile_cache.dart';
+import 'package:myloop/shared/services/step_claim_queue.dart';
 import 'package:myloop/shared/services/territory_cache.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +155,9 @@ class AuthService {
     await GameStateCache.clear();
     await TerritoryCache.clear();
     await NotificationCache.clear(); // notification inbox is user-bound too (#30)
+    // Also drop the on-disk step-claim WAL, or the next user's queue would re-read and
+    // drain the signed-out user's un-synced GPS points under the new session (#13).
+    await StepClaimQueue.clearPersisted();
     // Only attempt Google sign-out if we previously initialized the SDK.
     if (_googleInitialized) {
       await GoogleSignIn.instance.signOut();

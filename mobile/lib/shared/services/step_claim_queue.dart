@@ -89,6 +89,22 @@ class StepClaimQueue {
         await _atomicWrite('');
       });
 
+  /// Deletes the on-disk WAL without needing a live, initialized instance — used on
+  /// sign-out (#13). The WAL path is process-wide (one file per app, not per user), so a
+  /// queue left behind by a signed-out user would otherwise be re-read by the next user's
+  /// queue on [init] and drained under THEIR session, attributing the previous user's GPS
+  /// points — and territory — to the wrong account. Deleting both the WAL and any leftover
+  /// temp file guarantees the next sign-in starts from an empty queue.
+  static Future<void> clearPersisted() async {
+    final dir = await getApplicationDocumentsDirectory();
+    for (final path in ['${dir.path}/$_fileName', '${dir.path}/$_fileName.tmp']) {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+  }
+
   /// Read all entries from disk (used on init and after crash recovery).
   Future<List<QueuedStepPoint>> _readAll() async {
     if (_file == null || !await _file!.exists()) return [];
