@@ -117,7 +117,7 @@ public class TerritoryService : ITerritoryService
             // only fills interior hexes and awards the one-time distance XP computed below;
             // it must not re-add DistanceKm or WalkDistance mission progress, which the
             // batch-step drain already accumulated during the walk.
-            await UpdateUserStats(userId, transfers);
+            await UpdateUserStats(userId, transfers, gameDay);
 
             // Record exploration for all captured cells (single batched upsert)
             var newExplorations = await RecordExplorationBatch(userId, cells.Select(c => c.CellId));
@@ -1149,7 +1149,7 @@ public class TerritoryService : ITerritoryService
             hexLocation.City, hexLocation.State, hexLocation.Country, hexLocation.Continent);
     }
 
-    private async Task UpdateUserStats(Guid userId, List<CellTransfer> transfers)
+    private async Task UpdateUserStats(Guid userId, List<CellTransfer> transfers, DateOnly gameDay)
     {
         var user = await _db.Users.FindAsync(userId);
         if (user == null) return;
@@ -1163,14 +1163,12 @@ public class TerritoryService : ITerritoryService
         // this walk's full GPS distance before this loop-claim runs, so re-adding it here
         // would double-count distance on every walk-and-loop journey.
 
-        UpdateStreak(user);
+        UpdateStreak(user, gameDay);
         await DecrementVictimHexCounts(userId, transfers);
     }
 
-    private static void UpdateStreak(User user)
-    {
-        UpdateStreak(user, DateOnly.FromDateTime(DateTime.UtcNow));
-    }
+    // No parameterless UpdateStreak overload: every caller must pass the resolved game day
+    // (GameDay.Resolve), or the loop and batch paths drift onto different "todays" (#106, #88).
 
     /// <summary>
     /// Updates the user's streak using the supplied date as "today".
