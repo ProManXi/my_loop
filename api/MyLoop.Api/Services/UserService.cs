@@ -106,14 +106,17 @@ public class UserService : IUserService
 
     private async Task CreateInitialLeaderboardEntry(Guid userId)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // Join the CURRENT visible snapshot, not raw UTC today: a today-dated row written
+        // before the day's first refresh would become the newest "snapshot" and hide the
+        // real board from every reader until the refresh runs (#125).
+        var snapshotDate = await LeaderboardService.LatestSnapshotDate(_db);
         var totalUsers = await _db.Users.CountAsync();
 
         _db.Set<LeaderboardEntry>().Add(new LeaderboardEntry
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            Date = today,
+            Date = snapshotDate,
             CellCount = 0,
             AreaM2 = 0,
             Rank = totalUsers,
@@ -125,12 +128,16 @@ public class UserService : IUserService
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
+        // Same blank-window fallback as the leaderboard (#125): between UTC midnight and the
+        // day's first refresh "today" has no rows, which zeroed the profile's rank tile.
+        var snapshotDate = await LeaderboardService.LatestSnapshotDate(_db);
+
         var entry = await _db.LeaderboardEntries
-            .Where(l => l.Date == today && l.UserId == userId)
+            .Where(l => l.Date == snapshotDate && l.UserId == userId)
             .FirstOrDefaultAsync();
 
         var totalPlayers = await _db.LeaderboardEntries
-            .Where(l => l.Date == today)
+            .Where(l => l.Date == snapshotDate)
             .CountAsync();
 
         return (entry?.Rank ?? 0, totalPlayers);
