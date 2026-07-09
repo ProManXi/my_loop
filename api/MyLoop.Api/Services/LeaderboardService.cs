@@ -193,15 +193,16 @@ public class LeaderboardService : ILeaderboardService
         IQueryable<LeaderboardEntry> query, DateOnly snapshotDate)
     {
         if (!userId.HasValue) return null;
+        var uid = userId.Value;
 
-        var inTop = topList.FirstOrDefault(e => e.UserId == userId.Value);
+        var inTop = topList.FirstOrDefault(e => e.UserId == uid);
         if (inTop != null)
         {
             return new MyRankResponse { Rank = inTop.Rank, CellCount = inTop.CellCount, AreaM2 = inTop.AreaM2 };
         }
 
         var globalEntry = await _db.LeaderboardEntries
-            .Where(l => l.Date == snapshotDate && l.UserId == userId.Value)
+            .Where(l => l.Date == snapshotDate && l.UserId == uid)
             .Select(l => new { l.CellCount, l.AreaM2 })
             .FirstOrDefaultAsync();
 
