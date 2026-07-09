@@ -171,7 +171,7 @@ public static class DbInitializer
             ON ""UserAchievements"" (""UserId"")");
     }
 
-    private static void ApplyTerritoryIndexes(AppDbContext db)
+    internal static void ApplyTerritoryIndexes(AppDbContext db)
     {
         // NeighborhoodId on TerritoryCells for per-area ownership queries.
         db.Database.ExecuteSqlRaw(
@@ -190,5 +190,11 @@ public static class DbInitializer
         db.Database.ExecuteSqlRaw(@"
             CREATE INDEX IF NOT EXISTS ""IX_TerritoryCells_Decay""
             ON ""TerritoryCells"" (""LastRefreshedAt"", ""DecayDays"")");
+
+        // Daily claim-cap count + claim-history grouping both filter Claims by
+        // (UserId, CreatedAt); the cap check runs inside EVERY claim transaction (#124).
+        db.Database.ExecuteSqlRaw(@"
+            CREATE INDEX IF NOT EXISTS ""IX_Claims_UserId_CreatedAt""
+            ON ""Claims"" (""UserId"", ""CreatedAt"")");
     }
 }
