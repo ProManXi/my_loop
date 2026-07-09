@@ -588,14 +588,27 @@ public class TerritoryService : ITerritoryService
         return commit.Response;
     }
 
-    public async Task<List<TerritoryCellResponse>> GetTerritoriesInViewport(
+    public async Task<TerritoryViewportResult> GetTerritoriesInViewport(
         double minLat, double minLng, double maxLat, double maxLng)
     {
-        var filtered = await _db.TerritoryCells
-            .AsNoTracking()
+        // Bucket-first pruning per docs/architecture/spatial-model.md (#114): filter on the
+        // indexed res-3 ParentCellId set covering the bbox, then refine by center coords.
+        // ORDER BY CellId makes the capped result deterministic — an unordered Take let
+        // Postgres return a different arbitrary subset each poll, so dense-city viewports
+        // flickered as hexes popped in and out. Fetch one row past the cap to learn whether
+        // the viewport was truncated without a second COUNT query.
+        var regionIds = _hexGrid.GetRegionIdsForBbox(minLat, minLng, maxLat, maxLng).ToList();
+
+        // Empty = "viewport too wide to prune" (see IHexGridService) — coordinate filter only.
+        var cells = _db.TerritoryCells.AsNoTracking().AsQueryable();
+        if (regionIds.Count > 0)
+            cells = cells.Where(t => regionIds.Contains(t.ParentCellId));
+
+        var filtered = await cells
             .Where(t => t.CenterLat >= minLat && t.CenterLat <= maxLat
                      && t.CenterLng >= minLng && t.CenterLng <= maxLng)
-            .Take(GameConstants.MaxViewportCells)
+            .OrderBy(t => t.CellId)
+            .Take(GameConstants.MaxViewportCells + 1)
             .Select(t => new
             {
                 t.CellId, t.BoundaryJson, t.OwnerId,
@@ -608,17 +621,24 @@ public class TerritoryService : ITerritoryService
             })
             .ToListAsync();
 
-        return filtered.Select(t => new TerritoryCellResponse
+        return new TerritoryViewportResult
         {
-            CellId = t.CellId,
-            Boundary = JsonSerializer.Deserialize<double[][]>(t.BoundaryJson),
-            OwnerId = t.OwnerId,
-            OwnerColor = t.OwnerColor,
-            OwnerName = t.OwnerName,
-            CooldownExpiresAtUtc = t.CooldownExpiresAt,
-            ParentCellId = t.ParentCellId,
-            DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
-        }).ToList();
+            Truncated = filtered.Count > GameConstants.MaxViewportCells,
+            Cells = filtered
+                .Take(GameConstants.MaxViewportCells)
+                .Select(t => new TerritoryCellResponse
+                {
+                    CellId = t.CellId,
+                    Boundary = JsonSerializer.Deserialize<double[][]>(t.BoundaryJson),
+                    OwnerId = t.OwnerId,
+                    OwnerColor = t.OwnerColor,
+                    OwnerName = t.OwnerName,
+                    CooldownExpiresAtUtc = t.CooldownExpiresAt,
+                    ParentCellId = t.ParentCellId,
+                    DecayProgress = ComputeDecayProgress(t.LastRefreshedAt, t.DecayDays),
+                })
+                .ToList(),
+        };
     }
 
     /// <summary>

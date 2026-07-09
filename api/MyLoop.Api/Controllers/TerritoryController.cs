@@ -38,8 +38,11 @@ public class TerritoryController : ControllerBase
         [FromQuery] double maxLat,
         [FromQuery] double maxLng)
     {
-        var territories = await _territoryService.GetTerritoriesInViewport(minLat, minLng, maxLat, maxLng);
-        return Ok(territories);
+        var viewport = await _territoryService.GetTerritoriesInViewport(minLat, minLng, maxLat, maxLng);
+        // The body stays the bare cell array the mobile client already parses; truncation is
+        // additive metadata in a header so existing clients are unaffected (#114).
+        Response.Headers["X-Viewport-Truncated"] = viewport.Truncated ? "true" : "false";
+        return Ok(viewport.Cells);
     }
 
     /// <summary>

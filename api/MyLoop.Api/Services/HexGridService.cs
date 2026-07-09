@@ -78,6 +78,83 @@ public class HexGridService : IHexGridService
         return (long)(ulong)parent;
     }
 
+    public IReadOnlyCollection<long> GetRegionIdsForBbox(double minLat, double minLng, double maxLat, double maxLng)
+    {
+        // A near-global viewport would produce thousands of parents — a giant ANY() array
+        // that pushes the planner off the composite index while costing real CPU to build.
+        // Empty means "too wide to prune"; the caller falls back to the coordinate filter.
+        if (maxLat - minLat > GameConstants.MaxRegionPruneSpanDegrees
+            || maxLng - minLng > GameConstants.MaxRegionPruneSpanDegrees)
+            return [];
+
+        // Seeds: perimeter samples spaced below the res-3 inradius guarantee every parent
+        // touching the bbox is within one ring of a sample — including long thin strips
+        // whose interior holds no res-3 cell center. The center-mode polyfill adds the
+        // interior parents of wide viewports; the center point covers tiny viewports.
+        var seeds = new HashSet<H3Index>
+        {
+            PointToParentIndex((minLat + maxLat) / 2.0, (minLng + maxLng) / 2.0),
+        };
+        foreach (var (lat, lng) in PerimeterSamples(minLat, minLng, maxLat, maxLng))
+            seeds.Add(PointToParentIndex(lat, lng));
+
+        var corners = new[]
+        {
+            new Coordinate(minLng, minLat),
+            new Coordinate(maxLng, minLat),
+            new Coordinate(maxLng, maxLat),
+            new Coordinate(minLng, maxLat),
+            new Coordinate(minLng, minLat),
+        };
+        try
+        {
+            var bbox = GeomFactory.CreatePolygon(GeomFactory.CreateLinearRing(corners));
+            foreach (var cell in bbox.Fill(GameConstants.H3ParentResolution))
+                seeds.Add(cell);
+        }
+        catch { /* Degenerate bbox — the perimeter/center seeds still cover it */ }
+
+        // Pad every seed by one neighbor ring: parents that intersect the bbox edge without
+        // their center inside it, and res-11 cells that protrude slightly outside their
+        // parent's polygon (H3 parent-child containment is inexact), must not be missed.
+        // Over-covering only widens the index scan; under-covering drops visible hexes.
+        var region = new HashSet<long>();
+        foreach (var seed in seeds)
+            foreach (var neighbor in seed.GridDiskDistances(1))
+                region.Add((long)(ulong)neighbor.Index);
+        return region;
+    }
+
+    /// <summary>
+    /// Points along all four bbox edges (corners included) at a spacing below the res-3
+    /// inradius (~51 km ≈ 0.46° latitude), so no parent cell can slip between two samples.
+    /// Bounded by <see cref="GameConstants.MaxRegionPruneSpanDegrees"/> to ≤ ~100 points.
+    /// </summary>
+    private static IEnumerable<(double Lat, double Lng)> PerimeterSamples(
+        double minLat, double minLng, double maxLat, double maxLng)
+    {
+        const double step = 0.4;
+        for (var lat = minLat; ; lat = Math.Min(lat + step, maxLat))
+        {
+            yield return (lat, minLng);
+            yield return (lat, maxLng);
+            if (lat >= maxLat) break;
+        }
+        for (var lng = minLng; ; lng = Math.Min(lng + step, maxLng))
+        {
+            yield return (minLat, lng);
+            yield return (maxLat, lng);
+            if (lng >= maxLng) break;
+        }
+    }
+
+    private static H3Index PointToParentIndex(double lat, double lng)
+    {
+        var latRad = lat * Math.PI / 180.0;
+        var lngRad = lng * Math.PI / 180.0;
+        return H3Index.FromLatLng(new LatLng(latRad, lngRad), GameConstants.H3ParentResolution);
+    }
+
     public bool IsValidRegionId(string regionId)
     {
         if (!long.TryParse(regionId, out var cellId))
