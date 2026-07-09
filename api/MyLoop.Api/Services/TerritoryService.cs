@@ -294,9 +294,9 @@ public class TerritoryService : ITerritoryService
             var transfers = new List<CellTransfer>();
             var capturedHexes = new List<HexCell>(); // for ownership broadcast
             var processedThisBatch = new HashSet<long>(); // dedupe same hex hit twice
+            var exploredCellIds = new HashSet<long>(); // recorded in ONE statement after the loop (#107)
             var newCellsCount = 0;
             var stolenCellsCount = 0;
-            var newExplorations = 0;
 
             // Build path for the synthetic Claim entity (stitches all points together)
             var pathPoints = points.Select(p => new[] { p.Lat, p.Lng }).ToArray();
@@ -326,7 +326,7 @@ public class TerritoryService : ITerritoryService
                 if (existing != null && existing.OwnerId == userId)
                 {
                     existing.LastRefreshedAt = DateTime.UtcNow;
-                    await RecordExploration(userId, cellId);
+                    exploredCellIds.Add(cellId);
                     processedThisBatch.Add(cellId);
                     results.Add(new BatchStepResult
                     {
@@ -379,9 +379,7 @@ public class TerritoryService : ITerritoryService
                     newCellsCount++;
                 }
 
-                if (await RecordExploration(userId, cellId))
-                    newExplorations++;
-
+                exploredCellIds.Add(cellId);
                 processedThisBatch.Add(cellId);
                 capturedHexes.Add(hexCell);
 
@@ -397,6 +395,12 @@ public class TerritoryService : ITerritoryService
             }
 
             var totalClaimedThisBatch = newCellsCount + stolenCellsCount;
+
+            // One ExploredCells statement for the whole batch (#107). The per-point upsert was
+            // up to 200 sequential round-trips inside this serializable transaction — seconds of
+            // pure RTT on cloud Postgres. The insert count preserves newExplorations semantics:
+            // distinct cells this batch that had no ExploredCells row yet.
+            var newExplorations = await RecordExplorationBatch(userId, exploredCellIds);
 
             // Real distance walked this slice (full GPS path, including travel over cells
             // already owned). Fixes HIGH-11: DistanceKm was never incremented on the
@@ -1206,20 +1210,6 @@ public class TerritoryService : ITerritoryService
             user.MaxStreak = user.Streak;
     }
 
-
-    private async Task<bool> RecordExploration(Guid userId, long cellId)
-    {
-        var neighborhoodId = _hexGrid.GetNeighborhoodId(cellId);
-        var now = DateTime.UtcNow;
-
-        // Upsert: INSERT ... ON CONFLICT DO NOTHING — single round-trip, no race conditions
-        var rowsAffected = await _db.Database.ExecuteSqlAsync($"""
-            INSERT INTO "ExploredCells" ("UserId", "CellId", "NeighborhoodId", "FirstVisitedAt")
-            VALUES ({userId}, {cellId}, {neighborhoodId}, {now})
-            ON CONFLICT ("UserId", "CellId") DO NOTHING
-            """);
-        return rowsAffected > 0;
-    }
 
     private async Task DecrementVictimHexCounts(Guid userId, List<CellTransfer> transfers)
     {
