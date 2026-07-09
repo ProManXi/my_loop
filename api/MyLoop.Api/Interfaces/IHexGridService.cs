@@ -37,6 +37,15 @@ public interface IHexGridService
     long GetNeighborhoodId(long cellId);
 
     /// <summary>
+    /// Gets every parent-resolution H3 cell id that could contain a cell whose center lies in
+    /// the bounding box — the bucket-first pruning set for viewport queries. Deliberately
+    /// over-covers (padded by one neighbor ring) and must never under-cover. Returns an
+    /// EMPTY set for boxes wider than GameConstants.MaxRegionPruneSpanDegrees per axis,
+    /// meaning "too wide to prune" — callers must then skip the ParentCellId filter.
+    /// </summary>
+    IReadOnlyCollection<long> GetRegionIdsForBbox(double minLat, double minLng, double maxLat, double maxLng);
+
+    /// <summary>
     /// Calculates the total area for a given number of hex cells.
     /// </summary>
     double CalculateArea(int cellCount);

@@ -96,3 +96,16 @@ public class ExplorationNeighborhood
     /// <summary>Human-readable area/neighborhood name from reverse geocoding.</summary>
     public string AreaName { get; set; } = "";
 }
+
+/// <summary>
+/// Service-level result for viewport queries. The HTTP body stays the bare cell array (the
+/// mobile client parses a JSON list); Truncated travels as the X-Viewport-Truncated response
+/// header so clients can adopt zoom-dependent handling (ML-FEAT-003) without a breaking change.
+/// </summary>
+public class TerritoryViewportResult
+{
+    public List<TerritoryCellResponse> Cells { get; set; } = [];
+
+    /// <summary>True when the viewport held more cells than the response cap.</summary>
+    public bool Truncated { get; set; }
+}

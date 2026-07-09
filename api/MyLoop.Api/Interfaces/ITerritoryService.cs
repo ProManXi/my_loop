@@ -24,9 +24,10 @@ public interface ITerritoryService
         Guid userId, string? clientLocalDate, List<BatchStepPoint> points, Guid walkSessionId);
 
     /// <summary>
-    /// Gets all territory cells within a map viewport bounding box.
+    /// Gets the territory cells within a map viewport bounding box (deterministically
+    /// ordered, capped) plus whether the cap truncated the result.
     /// </summary>
-    Task<List<TerritoryCellResponse>> GetTerritoriesInViewport(
+    Task<TerritoryViewportResult> GetTerritoriesInViewport(
         double minLat, double minLng, double maxLat, double maxLng);
 
     /// <summary>
