@@ -23,12 +23,15 @@ public class LeaderboardService : ILeaderboardService
 
     public async Task<LeaderboardResponse> GetLeaderboard(double lat, double lng, Guid? userId, string scope)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var leaderboardScope = scope.ToLowerInvariant();
 
-        var query = BuildScopedQuery(today, leaderboardScope, userId);
+        // Between UTC midnight and the day's first refresh there are no rows for "today" yet;
+        // serve the latest committed snapshot instead of a blank board (#125).
+        var snapshotDate = await LatestSnapshotDate(_db);
+
+        var query = await BuildScopedQuery(snapshotDate, leaderboardScope, userId);
         var scopedTop = await FetchTopEntries(query);
-        var myRank = await ResolveUserRank(userId, scopedTop, query, today);
+        var myRank = await ResolveUserRank(userId, scopedTop, query, snapshotDate);
 
         return new LeaderboardResponse
         {
@@ -104,16 +107,31 @@ public class LeaderboardService : ILeaderboardService
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
 
-    private IQueryable<LeaderboardEntry> BuildScopedQuery(DateOnly today, string scope, Guid? userId)
+    /// <summary>
+    /// The newest committed snapshot date (≤ UTC today), or today for an empty table. Every
+    /// read of the board AND every registration row must key on this, not raw UTC today:
+    /// between 00:00 UTC and the day's first refresh "today" has no snapshot, and a stray
+    /// today-dated row (e.g. a signup) would otherwise hide the latest full snapshot (#125).
+    /// </summary>
+    internal static async Task<DateOnly> LatestSnapshotDate(AppDbContext db)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.LeaderboardEntries
+            .Where(l => l.Date <= today)
+            .MaxAsync(l => (DateOnly?)l.Date) ?? today;
+    }
+
+    private async Task<IQueryable<LeaderboardEntry>> BuildScopedQuery(
+        DateOnly snapshotDate, string scope, Guid? userId)
     {
         var query = _db.LeaderboardEntries
             .Include(l => l.User)
-            .Where(l => l.Date == today);
+            .Where(l => l.Date == snapshotDate);
 
         if (scope is not ("city" or "country")) return query;
         if (!userId.HasValue) return query;
 
-        var user = _db.Users.Find(userId.Value);
+        var user = await _db.Users.FindAsync(userId.Value);
         if (user == null) return query;
 
         return scope switch
@@ -143,35 +161,48 @@ public class LeaderboardService : ILeaderboardService
             })
             .ToListAsync();
 
-        return topEntries.Select((e, i) => new LeaderboardEntryResponse
+        // Competition ranking ("1224"): tied cell counts share a rank. This is the same
+        // count-of-higher rule ResolveUserRank applies to users OUTSIDE this window, so a
+        // tied player sees the same rank whether they made the top list or sit just below
+        // it — positional i+1 numbering showed tied users different ranks (#125).
+        var responses = new List<LeaderboardEntryResponse>(topEntries.Count);
+        for (var i = 0; i < topEntries.Count; i++)
         {
-            Rank = i + 1,
-            UserId = e.UserId,
-            UserName = e.UserName,
-            UserColor = e.UserColor,
-            UserAvatar = e.UserAvatar,
-            UserHexCount = e.UserHexCount,
-            UserStreak = e.UserStreak,
-            UserDistanceKm = e.UserDistanceKm,
-            CellCount = e.CellCount,
-            AreaM2 = e.AreaM2,
-        }).ToList();
+            var e = topEntries[i];
+            responses.Add(new LeaderboardEntryResponse
+            {
+                Rank = i > 0 && topEntries[i - 1].CellCount == e.CellCount
+                    ? responses[i - 1].Rank
+                    : i + 1,
+                UserId = e.UserId,
+                UserName = e.UserName,
+                UserColor = e.UserColor,
+                UserAvatar = e.UserAvatar,
+                UserHexCount = e.UserHexCount,
+                UserStreak = e.UserStreak,
+                UserDistanceKm = e.UserDistanceKm,
+                CellCount = e.CellCount,
+                AreaM2 = e.AreaM2,
+            });
+        }
+        return responses;
     }
 
     private async Task<MyRankResponse?> ResolveUserRank(
         Guid? userId, List<LeaderboardEntryResponse> topList,
-        IQueryable<LeaderboardEntry> query, DateOnly today)
+        IQueryable<LeaderboardEntry> query, DateOnly snapshotDate)
     {
         if (!userId.HasValue) return null;
+        var uid = userId.Value;
 
-        var inTop = topList.FirstOrDefault(e => e.UserId == userId.Value);
+        var inTop = topList.FirstOrDefault(e => e.UserId == uid);
         if (inTop != null)
         {
             return new MyRankResponse { Rank = inTop.Rank, CellCount = inTop.CellCount, AreaM2 = inTop.AreaM2 };
         }
 
         var globalEntry = await _db.LeaderboardEntries
-            .Where(l => l.Date == today && l.UserId == userId.Value)
+            .Where(l => l.Date == snapshotDate && l.UserId == uid)
             .Select(l => new { l.CellCount, l.AreaM2 })
             .FirstOrDefaultAsync();
 
