@@ -91,7 +91,11 @@ public class AppDbContext : DbContext
         // DailyMission: user missions per day
         modelBuilder.Entity<DailyMission>(e =>
         {
-            e.HasIndex(m => new { m.UserId, m.Date }); // fast: "get today's missions for user"
+            // Unique: one mission per type per user-day. Two concurrent first-of-day
+            // generations (e.g. /game-state hydration racing a claim's RecordProgress) must
+            // collapse into ONE mission set — the loser's insert violates and requeries (#131).
+            // The (UserId, Date) prefix still serves the "get today's missions" lookup.
+            e.HasIndex(m => new { m.UserId, m.Date, m.Type }).IsUnique();
         });
 
         // UserAchievement: one unlock per user per achievement
