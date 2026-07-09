@@ -110,12 +110,13 @@ public class GeocodingService
         => $"Area ({lat:F2}, {lng:F2})";
 
     /// <summary>
-    /// Returns full location info (city, state, country) for decay/home calculations.
-    /// Results are cached per 4-decimal coordinate bucket.
+    /// Returns full location info (city, state, country) for onboarding's home lookup.
+    /// Results are cached per 2-decimal coordinate bucket (~1.1km) — coarser than the
+    /// area-name cache since city/state/country boundaries don't need street precision.
     /// </summary>
     public async Task<LocationInfo> GetLocationInfo(double lat, double lng)
     {
-        var cacheKey = $"loc:{lat:F4},{lng:F4}";
+        var cacheKey = $"loc:{lat:F2},{lng:F2}";
         if (_locationCache.TryGetValue(cacheKey, out var cached))
             return cached;
 

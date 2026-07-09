@@ -48,44 +48,9 @@ public static class GameConstants
     public const int DecayDaysOtherContinent = 90;
 
     /// <summary>
-    /// Distance threshold (km) below which we skip geocoding and assume "same city".
-    /// </summary>
-    public const double SameCityDistanceKm = 30;
-
-    /// <summary>
-    /// Returns decay days based on geographic comparison between user's home and hex location.
-    /// Uses actual administrative boundaries (city/state/country/continent).
-    /// </summary>
-    public static int GetDecayDaysFromLocation(
-        string homeCity, string homeState, string homeCountry, string homeContinent,
-        string hexCity, string hexState, string hexCountry, string hexContinent)
-    {
-        // Same city → local decay
-        if (!string.IsNullOrEmpty(homeCity) && !string.IsNullOrEmpty(hexCity)
-            && string.Equals(homeCity, hexCity, StringComparison.OrdinalIgnoreCase))
-            return DecayDays;
-
-        // Same state/region → other city decay
-        if (!string.IsNullOrEmpty(homeState) && !string.IsNullOrEmpty(hexState)
-            && string.Equals(homeState, hexState, StringComparison.OrdinalIgnoreCase))
-            return DecayDaysOtherCity;
-
-        // Same country → other region decay
-        if (!string.IsNullOrEmpty(homeCountry) && !string.IsNullOrEmpty(hexCountry)
-            && string.Equals(homeCountry, hexCountry, StringComparison.OrdinalIgnoreCase))
-            return DecayDaysOtherRegion;
-
-        // Same continent → other country decay
-        if (!string.IsNullOrEmpty(homeContinent) && !string.IsNullOrEmpty(hexContinent)
-            && string.Equals(homeContinent, hexContinent, StringComparison.OrdinalIgnoreCase))
-            return DecayDaysOtherCountry;
-
-        // Different continent
-        return DecayDaysOtherContinent;
-    }
-
-    /// <summary>
-    /// Fallback: returns decay days based on raw distance when geocoding is unavailable.
+    /// Returns decay days from the great-circle distance between a hex and the user's home,
+    /// approximating the city/region/country/continent tiers without reverse-geocoding
+    /// (ML-ERR-004 — geocoding is I/O and must never run inside the claim transaction).
     /// </summary>
     public static int GetDecayDaysForDistance(double distanceKm)
     {
