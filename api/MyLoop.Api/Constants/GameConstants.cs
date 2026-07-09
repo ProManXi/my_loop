@@ -12,6 +12,11 @@ public static class GameConstants
     public const double MaxClaimAreaSquareMeters = 5_000_000.0; // 5 km²
     /// <summary>Hard cap on cells assigned in one claim (secondary guard alongside area).</summary>
     public const int MaxCellsPerClaim = 3000;
+    /// <summary>
+    /// Max distinct walks (Claims) per day, counted by UTC day ON PURPOSE: this is an
+    /// anti-abuse bound with a fixed window immune to client-supplied local dates — unlike
+    /// streaks and missions, which follow the player's local day via GameDay.Resolve (#106).
+    /// </summary>
     public const int MaxClaimsPerDay = 20;
     public const double LoopClosureDistanceMeters = 50.0;
     public const int MinLoopPoints = 20;
