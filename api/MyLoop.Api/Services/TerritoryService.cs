@@ -648,7 +648,10 @@ public class TerritoryService : ITerritoryService
         var since = DateTime.UtcNow.AddDays(-clampedDays);
 
         var stolen = await _db.CellTransfers
-            .Where(t => t.FromUserId == userId && t.TransferredAt >= since)
+            // Decay releases write FromUserId == ToUserId audit rows (#104) — losing a hex
+            // to the reaper is not a theft and must not appear in the revenge list.
+            .Where(t => t.FromUserId == userId && t.Reason != TransferReason.Decay
+                     && t.TransferredAt >= since)
             .OrderByDescending(t => t.TransferredAt)
             .Select(t => new StolenCellDetail
             {

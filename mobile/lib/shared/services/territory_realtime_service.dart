@@ -51,6 +51,23 @@ class HexChangeEvent {
   }
 }
 
+/// Event emitted when the decay reaper releases hexes (region-scoped, #104).
+/// Without it, released territory keeps rendering until the next viewport poll.
+/// Ids travel as strings: H3 ids exceed 2^53 and the region keys are already strings.
+class HexesReleasedEvent {
+  final String parentCellId;
+  final List<String> h3Indexes;
+
+  HexesReleasedEvent({required this.parentCellId, required this.h3Indexes});
+
+  factory HexesReleasedEvent.fromJson(Map<String, dynamic> json) {
+    return HexesReleasedEvent(
+      parentCellId: json['parentCellId'] as String? ?? '',
+      h3Indexes: (json['h3Indexes'] as List? ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Personal delta event classes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +168,7 @@ class TerritoryRealtimeService {
   final String _baseUrl;
   HubConnection? _hubConnection;
   final _changeController = StreamController<List<HexChangeEvent>>.broadcast();
+  final _releasedController = StreamController<HexesReleasedEvent>.broadcast();
   final _userStatsController = StreamController<UserStatsDelta>.broadcast();
   final _xpController = StreamController<XpDelta>.broadcast();
   final _missionController = StreamController<MissionDelta>.broadcast();
@@ -163,6 +181,7 @@ class TerritoryRealtimeService {
 
   // ── Public streams ──
   Stream<List<HexChangeEvent>> get onHexChanges => _changeController.stream;
+  Stream<HexesReleasedEvent> get onHexesReleased => _releasedController.stream;
   Stream<UserStatsDelta> get onUserStats => _userStatsController.stream;
   Stream<XpDelta> get onXp => _xpController.stream;
   Stream<MissionDelta> get onMissions => _missionController.stream;
@@ -187,8 +206,9 @@ class TerritoryRealtimeService {
         .withAutomaticReconnect()
         .build();
 
-    // Public event
+    // Public events
     _hubConnection!.on('HexOwnershipChanged', _handleHexChanges);
+    _hubConnection!.on('HexesReleased', _handleHexesReleased);
 
     // Personal events
     _hubConnection!.on('UserStatsDelta', _handleUserStats);
@@ -267,6 +287,7 @@ class TerritoryRealtimeService {
   void dispose() {
     disconnect();
     _changeController.close();
+    _releasedController.close();
     _userStatsController.close();
     _xpController.close();
     _missionController.close();
@@ -287,6 +308,17 @@ class TerritoryRealtimeService {
 
     if (events.isNotEmpty) {
       _changeController.add(events);
+    }
+  }
+
+  void _handleHexesReleased(List<Object?>? arguments) {
+    if (arguments == null || arguments.isEmpty) return;
+    final raw = arguments[0];
+    if (raw is! Map<String, dynamic>) return;
+    final event = HexesReleasedEvent.fromJson(raw);
+    if (event.h3Indexes.isNotEmpty) {
+      _releasedController.add(event);
+      _log.fine('HexesReleased: ${event.h3Indexes.length} in ${event.parentCellId}');
     }
   }
 

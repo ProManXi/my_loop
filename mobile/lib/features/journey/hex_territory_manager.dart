@@ -252,6 +252,49 @@ class HexTerritoryManager {
     return changed;
   }
 
+  /// Removes decay-released cells from every render layer (server-authoritative map:
+  /// the reaper's HexesReleased broadcast must clear them immediately, not at the next
+  /// viewport poll). Returns true if anything visible changed (caller repaints).
+  ///
+  /// A hex this client never loaded has no boundary to match in the color layers —
+  /// it was never visible, so there is nothing to repaint (same limitation as
+  /// [applyRealtimeChanges]).
+  bool removeCells(Iterable<String> h3Indexes) {
+    var changed = false;
+    for (final idStr in h3Indexes) {
+      final cellId = int.tryParse(idStr);
+      if (cellId == null) continue;
+
+      List<List<double>>? boundary;
+      final idx = allCells.indexWhere((c) => c.cellId == cellId);
+      if (idx >= 0) {
+        boundary = allCells[idx].boundary;
+        allCells.removeAt(idx);
+        changed = true;
+      }
+
+      if (userOwnCellIds.remove(cellId)) {
+        changed = true;
+        if (boundary != null) {
+          final center = _computeCenter(boundary);
+          // Parallel arrays — remove boundary and decay value at the same index.
+          for (var i = userOwnHexBoundaries.length - 1; i >= 0; i--) {
+            if (_boundaryMatchesCenter(userOwnHexBoundaries[i], center[0], center[1])) {
+              userOwnHexBoundaries.removeAt(i);
+              if (i < userOwnDecayValues.length) userOwnDecayValues.removeAt(i);
+            }
+          }
+        }
+      }
+
+      if (boundary != null) {
+        final center = _computeCenter(boundary);
+        changed |= _removeFromOthersByCenter(center[0], center[1]) != null;
+      }
+    }
+    return changed;
+  }
+
   /// Remove a hex from otherHexesByColor by matching its center coordinates.
   /// Returns the first removed boundary (null if nothing matched) so callers
   /// can re-add it under a new owner.

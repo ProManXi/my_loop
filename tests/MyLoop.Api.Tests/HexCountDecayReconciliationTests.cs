@@ -97,7 +97,7 @@ public class HexCountDecayReconciliationTests : IAsyncLifetime
         await using (var db = NewDb())
         {
             var released = await DecayCleanupService.ReleaseDecayedCellsAsync(db, batchSize, CancellationToken.None);
-            Assert.Equal(batchSize, released);
+            Assert.Equal(batchSize, released.Count);
         }
         await AssertHexCountMatchesOwnedCount(user, expected: decayedCount + freshCount - batchSize);
 
@@ -105,7 +105,7 @@ public class HexCountDecayReconciliationTests : IAsyncLifetime
         await using (var db = NewDb())
         {
             var released = await DecayCleanupService.ReleaseDecayedCellsAsync(db, batchSize, CancellationToken.None);
-            Assert.Equal(decayedCount - batchSize, released);
+            Assert.Equal(decayedCount - batchSize, released.Count);
         }
 
         // The bug would have decremented HexCount for ALL decayed cells on each run (8 then 3),
@@ -116,7 +116,7 @@ public class HexCountDecayReconciliationTests : IAsyncLifetime
         await using (var db = NewDb())
         {
             var released = await DecayCleanupService.ReleaseDecayedCellsAsync(db, batchSize, CancellationToken.None);
-            Assert.Equal(0, released);
+            Assert.Empty(released);
         }
         await AssertHexCountMatchesOwnedCount(user, expected: freshCount);
     }

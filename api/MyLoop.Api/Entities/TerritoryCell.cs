@@ -60,6 +60,13 @@ public class TerritoryCell
     public int DecayDays { get; set; } = 7;
 
     /// <summary>
+    /// When this cell decays: LastRefreshedAt + DecayDays, computed and STORED by Postgres
+    /// (see AppDbContext) so the hourly reaper scan is a plain indexed range predicate
+    /// instead of an unindexable per-row interval expression (#104). Never set by code.
+    /// </summary>
+    public DateTime DecayAt { get; private set; }
+
+    /// <summary>
     /// The 6 (or 5) corner vertices of this hexagon, serialized as a JSON array of [lat, lng] pairs.
     /// Used by the mobile client to render the hex polygon on the map.
     /// </summary>
