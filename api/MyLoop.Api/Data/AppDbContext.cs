@@ -65,6 +65,14 @@ public class AppDbContext : DbContext
             e.HasIndex(t => t.ParentCellId); // geohash-style partition pruning by area
         });
 
+        // Claim: the per-day cap count (UserId + CreatedAt window) runs inside EVERY claim
+        // transaction, and claim history groups over the same predicate — without this index
+        // both degrade to per-claim seq scans as claim volume grows (#124)
+        modelBuilder.Entity<Claim>(e =>
+        {
+            e.HasIndex(c => new { c.UserId, c.CreatedAt });
+        });
+
         // CellTransfer: ownership history for revenge/recapture features
         modelBuilder.Entity<CellTransfer>(e =>
         {
