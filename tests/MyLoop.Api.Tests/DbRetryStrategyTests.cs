@@ -107,6 +107,28 @@ public class DbRetryStrategyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeleteAccount_runs_its_transaction_under_a_retrying_strategy()
+    {
+        var userId = Guid.NewGuid();
+        await using (var seed = NewDb())
+        {
+            seed.Users.Add(new User { Id = userId, FirebaseUid = "uidD", DisplayName = "D", Color = "#333333" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = NewDb();
+        var validation = new Mock<IValidationService>();
+        var userService = new UserService(db, validation.Object, NullLogger<UserService>.Instance);
+
+        // Before the execution-strategy wrap this line threw InvalidOperationException.
+        var deleted = await userService.DeleteAccount(userId);
+
+        Assert.True(deleted);
+        await using var check = NewDb();
+        Assert.Equal(0, await check.Users.CountAsync(u => u.Id == userId));
+    }
+
+    [Fact]
     public async Task RefreshLeaderboard_runs_its_transaction_under_a_retrying_strategy()
     {
         var userId = Guid.NewGuid();
