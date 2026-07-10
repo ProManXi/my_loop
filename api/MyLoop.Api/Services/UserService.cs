@@ -9,11 +9,13 @@ public class UserService : IUserService
 {
     private readonly AppDbContext _db;
     private readonly IValidationService _validation;
+    private readonly ILogger<UserService> _logger;
 
-    public UserService(AppDbContext db, IValidationService validation)
+    public UserService(AppDbContext db, IValidationService validation, ILogger<UserService> logger)
     {
         _db = db;
         _validation = validation;
+        _logger = logger;
     }
 
     public async Task<User> Register(RegisterRequest request, string firebaseUid, string authProvider)
@@ -71,13 +73,47 @@ public class UserService : IUserService
 
     public async Task<bool> DeleteAccount(Guid userId)
     {
-        var user = await _db.Users.FindAsync(userId);
-        if (user == null) return false;
+        // The purge is 8 separate ExecuteDeleteAsync statements plus the user row's own
+        // delete — wrapped in one transaction (under CreateExecutionStrategy so Neon's
+        // EnableRetryOnFailure can still retry a dropped connection) so a mid-sequence
+        // failure leaves nothing deleted instead of an orphaned partial purge (#122).
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            _db.ChangeTracker.Clear();
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                var user = await _db.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    await transaction.RollbackAsync();
+                    return false;
+                }
 
-        await DeleteUserData(userId);
-        _db.Users.Remove(user);
-        await _db.SaveChangesAsync();
-        return true;
+                await DeleteUserData(userId);
+                _db.Users.Remove(user);
+                await _db.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return true;
+            }
+            catch
+            {
+                // Preserve the original exception for the execution strategy to classify —
+                // a rollback on a dropped connection would otherwise throw and mask it.
+                try
+                {
+                    await transaction.RollbackAsync();
+                }
+                catch (Exception rollbackEx)
+                {
+                    _logger.LogWarning(rollbackEx,
+                        "Rollback after a failed account deletion also failed for user {UserId}; surfacing the original error",
+                        userId);
+                }
+                throw;
+            }
+        });
     }
 
     // ──────────────────────────────────────────────────────────────────────────
