@@ -28,4 +28,20 @@ public class CellTransfer
 
     /// <summary>Timestamp when the transfer occurred.</summary>
     public DateTime TransferredAt { get; set; }
+
+    /// <summary>Why the cell changed hands. Decay rows keep the event trail complete (#104).</summary>
+    public TransferReason Reason { get; set; }
+}
+
+/// <summary>Why a <see cref="CellTransfer"/> row exists.</summary>
+public enum TransferReason
+{
+    /// <summary>Claimed or stolen through a walk — the default for every pre-existing row.</summary>
+    Capture = 0,
+
+    /// <summary>
+    /// Released by the decay reaper. FromUserId == ToUserId == the losing owner and
+    /// ClaimId is Guid.Empty (no walk involved). Excluded from the revenge list.
+    /// </summary>
+    Decay = 1,
 }

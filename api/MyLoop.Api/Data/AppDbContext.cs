@@ -63,6 +63,17 @@ public class AppDbContext : DbContext
             e.HasIndex(t => t.OwnerId); // fast lookup: "give me all cells owned by this user"
             e.HasIndex(t => new { t.CenterLat, t.CenterLng }); // viewport queries (will upgrade to point+GiST via raw SQL)
             e.HasIndex(t => t.ParentCellId); // geohash-style partition pruning by area
+            // Stored generated column so the hourly decay scan is an indexed range
+            // predicate instead of a per-row interval computation (#104).
+            // Computed in UTC-naive timestamp space: timestamptz + interval is only STABLE
+            // in Postgres (timezone-dependent), which generated columns reject; the AT TIME
+            // ZONE 'UTC' projection makes the expression immutable.
+            e.Property(t => t.DecayAt)
+                .HasColumnType("timestamp without time zone")
+                .HasComputedColumnSql(
+                    @"(""LastRefreshedAt"" AT TIME ZONE 'UTC') + make_interval(days => ""DecayDays"")",
+                    stored: true);
+            e.HasIndex(t => t.DecayAt);
         });
 
         // CellTransfer: ownership history for revenge/recapture features

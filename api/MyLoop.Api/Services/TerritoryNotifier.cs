@@ -61,6 +61,34 @@ public class TerritoryNotifier : ITerritoryNotifier
             changes.Count, regionCount);
     }
 
+    public async Task NotifyHexesReleasedAsync(IReadOnlyList<HexReleasedEvent> released)
+    {
+        if (released.Count == 0) return;
+
+        foreach (var regionGroup in released.GroupBy(r => r.ParentCellId.ToString()))
+        {
+            var payload = new
+            {
+                ParentCellId = regionGroup.Key,
+                H3Indexes = regionGroup.Select(r => r.H3Index).ToList(),
+            };
+
+            // Same per-region isolation as HexOwnershipChanged (HIGH-10): one group's
+            // transport failure must not abort delivery to the others.
+            try
+            {
+                await _hubContext.Clients
+                    .Group(regionGroup.Key)
+                    .SendAsync("HexesReleased", payload);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to broadcast HexesReleased to region {Region}", regionGroup.Key);
+            }
+        }
+    }
+
     public Task NotifyUserStatsAsync(Guid userId, UserStatsDelta delta) =>
         SafeSendToUser(userId, "UserStatsDelta", delta, "UserStatsDelta");
 

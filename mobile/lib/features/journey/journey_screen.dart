@@ -333,6 +333,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
   List<List<List<double>>> _capturedHexBoundaries = [];
   late HexTerritoryManager _hexManager;
   StreamSubscription<List<HexChangeEvent>>? _realtimeSub;
+  StreamSubscription<HexesReleasedEvent>? _releasedSub;
 
   @override
   void initState() {
@@ -353,6 +354,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
     _locationTimer?.cancel();
     _hexRefreshTimer?.cancel();
     _realtimeSub?.cancel();
+    _releasedSub?.cancel();
     ref.read(territoryRealtimeProvider).disconnect();
     _mapController.dispose();
     super.dispose();
@@ -361,6 +363,12 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
   void _connectRealtime() {
     final realtimeService = ref.read(territoryRealtimeProvider);
     realtimeService.connect();
+    // Decay releases (#104): drop the reaper's hexes from the map immediately —
+    // without this the app renders ghost territory until the next viewport poll.
+    _releasedSub = realtimeService.onHexesReleased.listen((event) {
+      final changed = _hexManager.removeCells(event.h3Indexes);
+      if (changed && mounted) setState(() {});
+    });
     _realtimeSub = realtimeService.onHexChanges.listen((events) {
       final changed = _hexManager.applyRealtimeChanges(events);
       if (changed && mounted) setState(() {});

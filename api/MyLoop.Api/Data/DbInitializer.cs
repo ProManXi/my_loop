@@ -41,6 +41,7 @@ public static class DbInitializer
             ApplyDecayAndMissionsSchema(db);
             ApplyAchievementsSchema(db);
             ApplyTerritoryIndexes(db);
+            ApplyDecayReleaseSchema(db);
         }
         catch (Exception ex)
         {
@@ -213,5 +214,26 @@ public static class DbInitializer
         db.Database.ExecuteSqlRaw(@"
             CREATE INDEX IF NOT EXISTS ""IX_TerritoryCells_Decay""
             ON ""TerritoryCells"" (""LastRefreshedAt"", ""DecayDays"")");
+    }
+
+    /// <summary>
+    /// Decay-release schema (#104): the CellTransfer Reason audit column, and the stored
+    /// DecayAt generated column + index that make the hourly reaper scan indexable
+    /// (the old per-row interval predicate forced a full-table scan; its helper index
+    /// on (LastRefreshedAt, DecayDays) never served the predicate and is dropped).
+    /// Idempotent — safe on every startup and on fresh EnsureCreated databases.
+    /// </summary>
+    internal static void ApplyDecayReleaseSchema(AppDbContext db)
+    {
+        db.Database.ExecuteSqlRaw(
+            "ALTER TABLE \"CellTransfers\" ADD COLUMN IF NOT EXISTS \"Reason\" integer NOT NULL DEFAULT 0");
+        db.Database.ExecuteSqlRaw(@"
+            ALTER TABLE ""TerritoryCells"" ADD COLUMN IF NOT EXISTS ""DecayAt"" timestamp without time zone
+            GENERATED ALWAYS AS ((""LastRefreshedAt"" AT TIME ZONE 'UTC') + make_interval(days => ""DecayDays"")) STORED");
+        db.Database.ExecuteSqlRaw(@"
+            CREATE INDEX IF NOT EXISTS ""IX_TerritoryCells_DecayAt""
+            ON ""TerritoryCells"" (""DecayAt"")");
+        db.Database.ExecuteSqlRaw(
+            @"DROP INDEX IF EXISTS ""IX_TerritoryCells_Decay""");
     }
 }

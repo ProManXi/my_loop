@@ -12,6 +12,12 @@ public interface ITerritoryNotifier
     Task NotifyHexOwnershipChanged(IReadOnlyList<HexChangeEvent> changes);
 
     /// <summary>
+    /// Notifies region subscribers that the decay reaper released hexes — clients must
+    /// remove them or keep rendering ghost territory until their next viewport poll (#104).
+    /// </summary>
+    Task NotifyHexesReleasedAsync(IReadOnlyList<HexReleasedEvent> released);
+
+    /// <summary>
     /// Pushes updated user stats to the user's personal SignalR group.
     /// Sent after claims or when user is victim of theft.
     /// </summary>
@@ -51,6 +57,16 @@ public record HexChangeEvent(
     string NewOwnerColor,
     string NewOwnerDisplayName,
     Guid? PreviousOwnerId,
+    long ParentCellId
+);
+
+/// <summary>
+/// A hex released by decay, for the region-scoped HexesReleased broadcast.
+/// Ids travel as strings: H3 ids exceed 2^53, and the region group key is
+/// already the stringified parent id (see TerritoryHub.JoinRegion).
+/// </summary>
+public record HexReleasedEvent(
+    string H3Index,
     long ParentCellId
 );
 
