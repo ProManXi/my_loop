@@ -317,16 +317,6 @@ class ApiService {
     return LeaderboardResponse.fromJson(data);
   }
 
-  /// Triggers a leaderboard recompute from current territory data.
-  /// Call after each successful claim so the user's rank is fresh.
-  Future<void> refreshLeaderboard() async {
-    try {
-      await _dio.post('/api/leaderboard/refresh');
-    } catch (_) {
-      // Best-effort — non-critical if it fails
-    }
-  }
-
   /// Fetches a user's profile by ID.
   Future<AppUser> getUser(String id) async {
     final response = await _dio.get('/api/users/$id');

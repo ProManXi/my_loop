@@ -2,8 +2,8 @@ namespace MyLoop.Api.Entities;
 
 /// <summary>
 /// A daily leaderboard snapshot for one user.
-/// Computed by a batch job (POST /api/leaderboard/refresh) that ranks all players
-/// by total territory cells owned. One entry per user per day.
+/// Computed by <see cref="MyLoop.Api.Services.LeaderboardRefreshWorker"/>, a background timer
+/// that ranks all players by total territory cells owned. One entry per user per day.
 /// </summary>
 public class LeaderboardEntry
 {

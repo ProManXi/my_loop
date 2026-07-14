@@ -5,7 +5,8 @@ using MyLoop.Api.Services;
 namespace MyLoop.Api.Controllers;
 
 /// <summary>
-/// Handles leaderboard queries and refresh.
+/// Handles leaderboard queries. Refresh runs on a background timer
+/// (<see cref="LeaderboardRefreshWorker"/>), not on client request — see #109.
 /// </summary>
 [ApiController]
 [Route("api/leaderboard")]
@@ -13,12 +14,10 @@ namespace MyLoop.Api.Controllers;
 public class LeaderboardController : ControllerBase
 {
     private readonly ILeaderboardService _leaderboardService;
-    private readonly ILogger<LeaderboardController> _logger;
 
-    public LeaderboardController(ILeaderboardService leaderboardService, ILogger<LeaderboardController> logger)
+    public LeaderboardController(ILeaderboardService leaderboardService)
     {
         _leaderboardService = leaderboardService;
-        _logger = logger;
     }
 
     /// <summary>
@@ -35,17 +34,5 @@ public class LeaderboardController : ControllerBase
         var leaderboardScope = scope ?? "city";
         var result = await _leaderboardService.GetLeaderboard(lat, lng, userId, leaderboardScope);
         return Ok(result);
-    }
-
-    /// <summary>
-    /// Refresh today's leaderboard from current territory data.
-    /// In production this would be a scheduled job.
-    /// </summary>
-    [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh()
-    {
-        var playerCount = await _leaderboardService.RefreshLeaderboard();
-        _logger.LogInformation("Leaderboard refreshed: {PlayerCount} players ranked", playerCount);
-        return Ok(new { Message = "Leaderboard refreshed", PlayerCount = playerCount });
     }
 }
