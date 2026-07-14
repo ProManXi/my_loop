@@ -24,7 +24,8 @@ public static class ServiceRegistrationExtensions
                     maxRetryDelay: TimeSpan.FromSeconds(InfrastructureDefaults.DbMaxRetryDelaySeconds),
                     errorCodesToAdd: null)));
 
-    /// <summary>Registers domain services, identity resolution, the geocoding client, the decay worker, and the HexCount reconciliation worker.</summary>
+    /// <summary>Registers domain services, identity resolution, the geocoding client, and the decay,
+    /// HexCount reconciliation, and leaderboard refresh background workers.</summary>
     public static IServiceCollection AddMyLoopServices(this IServiceCollection services)
     {
         services.AddScoped<IValidationService, ValidationService>();
@@ -48,6 +49,8 @@ public static class ServiceRegistrationExtensions
         services.AddHostedService<DecayCleanupService>();
         // Backstop that repairs any HexCount drift back to the true owned-cell count.
         services.AddHostedService<HexCountReconciliationService>();
+        // Recomputes the leaderboard snapshot on a timer instead of a client-triggered endpoint.
+        services.AddHostedService<LeaderboardRefreshWorker>();
 
         services.AddHttpContextAccessor();
         services.AddMemoryCache();

@@ -141,7 +141,8 @@ class _JourneyScreenState extends ConsumerState<JourneyScreen> {
 
     int updatedRank = profile.rank;
     try {
-      await api.refreshLeaderboard();
+      // The board refreshes on a background timer now (#109), not on client request; read
+      // whatever the latest snapshot is rather than forcing a recompute.
       final lb = await api.getLeaderboard(lat: 0, lng: 0, userId: profile.userId!, scope: 'city');
       updatedRank = lb.myRank ?? profile.rank;
     } catch (_) {}
