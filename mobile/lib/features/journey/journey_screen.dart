@@ -345,7 +345,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
       const Duration(seconds: AppConstants.hexRefreshIntervalSeconds),
       (_) => _refreshViewportHexes(),
     );
-    _connectRealtime();
+    _subscribeRealtime();
   }
 
   @override
@@ -353,14 +353,18 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
     _locationTimer?.cancel();
     _hexRefreshTimer?.cancel();
     _realtimeSub?.cancel();
-    ref.read(territoryRealtimeProvider).disconnect();
     _mapController.dispose();
     super.dispose();
   }
 
-  void _connectRealtime() {
+  /// Subscribes to hex-change events on the app-wide SignalR connection. The
+  /// connection itself is owned by the login/session-restore bootstrap and torn down
+  /// only at sign-out (see [TerritoryRealtimeService]) — this screen must NOT call
+  /// connect()/disconnect() on it: doing so used to kill the authenticated connection
+  /// every time Journey closed, leaving the rest of the app deaf to realtime updates
+  /// until it was reopened (#102 / ML-ERR-005).
+  void _subscribeRealtime() {
     final realtimeService = ref.read(territoryRealtimeProvider);
-    realtimeService.connect();
     _realtimeSub = realtimeService.onHexChanges.listen((events) {
       final changed = _hexManager.applyRealtimeChanges(events);
       if (changed && mounted) setState(() {});

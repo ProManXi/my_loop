@@ -5,11 +5,14 @@
 /// - Personal: user stats, XP, missions, achievements (user-group-scoped)
 ///
 /// Connection lifecycle: connect once after login, stays alive until logout.
-/// Passes Firebase JWT via query string for authenticated personal events.
+/// Authenticates personal events via a bearer-token factory that re-reads the current
+/// Firebase ID token on every (re)connect, never a URL-embedded token (#102).
 library;
 
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 import 'package:signalr_netcore/signalr_client.dart';
@@ -146,10 +149,21 @@ class AchievementUnlockEvent {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Service that manages the SignalR connection to the territory hub.
-/// Singleton lifecycle: connect on login, disconnect on logout.
+///
+/// Singleton lifecycle: connect once on login (or warm session-restore), disconnect
+/// only on logout. No other screen may call [connect]/[disconnect] on this instance —
+/// doing so used to tear down the authenticated connection every time the Journey
+/// screen was closed, leaving the rest of the app deaf to realtime updates until it
+/// was reopened (#102 / ML-ERR-005).
 class TerritoryRealtimeService {
   final String _baseUrl;
   HubConnection? _hubConnection;
+
+  /// Count of connection attempts that actually reached [HubConnection.start] (i.e.
+  /// were not short-circuited by the already-connected guard). Exposed only so tests
+  /// can prove a failed attempt doesn't permanently wedge future [connect] calls.
+  @visibleForTesting
+  int connectAttempts = 0;
   final _changeController = StreamController<List<HexChangeEvent>>.broadcast();
   final _userStatsController = StreamController<UserStatsDelta>.broadcast();
   final _xpController = StreamController<XpDelta>.broadcast();
@@ -171,19 +185,28 @@ class TerritoryRealtimeService {
   bool get isConnected => _isConnected;
 
   /// Connect to the SignalR hub with optional authentication.
-  /// [token] — Firebase JWT for authenticated personal events.
+  /// [token] — non-empty when the caller wants authenticated personal events; only
+  /// used as a signal to attach [HttpConnectionOptions.accessTokenFactory] below, not
+  /// embedded in the URL (the URL is logged by proxies/servers — a bearer token in it
+  /// is a leak — and a URL-embedded token goes stale across the ~1h Firebase expiry,
+  /// silently breaking `withAutomaticReconnect`'s reconnect attempts). The factory
+  /// re-reads the current Firebase ID token on every (re)connect instead.
   /// [userId] — App user ID for joining personal group.
   Future<void> connect({String? token, String? userId}) async {
     if (_hubConnection != null) return;
 
     _userId = userId;
-    var hubUrl = '$_baseUrl/hubs/territory';
-    if (token != null && token.isNotEmpty) {
-      hubUrl += '?access_token=$token';
-    }
+    final hubUrl = '$_baseUrl/hubs/territory';
+    final options = (token != null && token.isNotEmpty)
+        ? HttpConnectionOptions(
+            accessTokenFactory: () async =>
+                await fb.FirebaseAuth.instance.currentUser?.getIdToken() ?? '',
+          )
+        : null;
 
+    connectAttempts++;
     _hubConnection = HubConnectionBuilder()
-        .withUrl(hubUrl)
+        .withUrl(hubUrl, options: options)
         .withAutomaticReconnect()
         .build();
 
@@ -219,6 +242,12 @@ class TerritoryRealtimeService {
       }
     } catch (e) {
       _isConnected = false;
+      // Null the handle so the NEXT connect() call is a fresh attempt instead of a
+      // permanent no-op: pre-fix, a failed start() left `_hubConnection` set, and the
+      // guard at the top of this method silently short-circuited every later retry —
+      // one bad connection attempt (e.g. no network at login) wedged the service deaf
+      // for the rest of the app session (#102 / ML-ERR-005).
+      _hubConnection = null;
       _log.warning('Connection failed', e);
     }
   }

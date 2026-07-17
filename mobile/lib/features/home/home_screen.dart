@@ -16,6 +16,7 @@ import 'package:myloop/shared/services/auth_service.dart';
 import 'package:myloop/shared/services/game_state_cache.dart';
 import 'package:myloop/shared/services/profile_cache.dart';
 import 'package:myloop/shared/services/territory_cache.dart';
+import 'package:myloop/shared/services/territory_realtime_service.dart';
 import 'package:myloop/shared/services/user_state.dart';
 import 'package:myloop/shared/widgets/avatar_widget.dart';
 
@@ -213,6 +214,9 @@ class _ProfileDrawer extends ConsumerWidget {
               Navigator.pop(context);
               ref.read(userProfileProvider.notifier).clear();
               await ref.read(authServiceProvider).signOut();
+              // Only place the app-wide hub connection should be torn down (#102):
+              // signing out ends the session that authenticated it.
+              await ref.read(territoryRealtimeProvider).disconnect();
               if (context.mounted) context.go('/login');
             },
           ),
@@ -326,6 +330,8 @@ class _ProfileDrawer extends ConsumerWidget {
                 // Firebase delete may fail if re-auth needed — account is already gone server-side
                 await FirebaseAuth.instance.signOut();
               }
+              // Deletion ends the session (#102): no user remains to hold the hub open.
+              await ref.read(territoryRealtimeProvider).disconnect();
               if (context.mounted) context.go('/login');
             },
             child: Text('Delete', style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.w700)),
