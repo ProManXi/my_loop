@@ -1,33 +1,29 @@
-/// User state provider — holds current user profile data in memory.
+/// User state provider — holds the current user's identity in memory.
 ///
-/// Manages avatar ID, color, display name, hex count, streak, and stats
-/// so that changes immediately reflect across all screens.
+/// Manages user id, avatar ID, color, and display name so that identity
+/// changes immediately reflect across all screens. Game stats (hex count,
+/// streak, distance, rank) are owned exclusively by `profileSliceProvider`
+/// (see `shared/state/profile_slice.dart`) — see issue #113: this notifier
+/// used to also mirror those stats from live SignalR pushes, which let it
+/// drift from the slice under ties/scopes since two independent listeners
+/// updated two independent copies of the same numbers.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myloop/shared/services/api_service.dart';
-import 'package:myloop/shared/services/territory_realtime_service.dart';
 
-/// Immutable snapshot of the current user's profile.
+/// Immutable snapshot of the current user's identity.
 class UserProfile {
   final String? userId;
   final int avatarId;
   final String color;
   final String displayName;
-  final int hexCount;
-  final int streak;
-  final double distanceKm;
-  final int rank;
 
   const UserProfile({
     this.userId,
     this.avatarId = 0,
     this.color = '#00D4AA',
     this.displayName = 'Player',
-    this.hexCount = 0,
-    this.streak = 0,
-    this.distanceKm = 0,
-    this.rank = 0,
   });
 
   UserProfile copyWith({
@@ -35,50 +31,20 @@ class UserProfile {
     int? avatarId,
     String? color,
     String? displayName,
-    int? hexCount,
-    int? streak,
-    double? distanceKm,
-    int? rank,
   }) {
     return UserProfile(
       userId: userId ?? this.userId,
       avatarId: avatarId ?? this.avatarId,
       color: color ?? this.color,
       displayName: displayName ?? this.displayName,
-      hexCount: hexCount ?? this.hexCount,
-      streak: streak ?? this.streak,
-      distanceKm: distanceKm ?? this.distanceKm,
-      rank: rank ?? this.rank,
     );
   }
 }
 
-/// Notifier that manages user profile state.
+/// Notifier that manages user identity state.
 class UserProfileNotifier extends Notifier<UserProfile> {
   @override
-  UserProfile build() {
-    // Keep the displayed profile in sync with server-authoritative stat pushes.
-    // The server emits a UserStatsDelta over SignalR on every capture/steal/victim
-    // event (e.g. each batch-step claim while walking). Without consuming it here
-    // the hex count shown on the Map and Home stays frozen at its pre-walk value
-    // mid-walk and only reconciles after the post-walk refresh — so the Map count
-    // diverged from the real (server) count while tracking (issue #30).
-    final realtime = ref.read(territoryRealtimeProvider);
-    final sub = realtime.onUserStats.listen(_applyStatsDelta);
-    ref.onDispose(sub.cancel);
-    return const UserProfile();
-  }
-
-  /// Applies a live server stat push to the in-memory profile. Only the fields
-  /// the delta carries are touched; identity (userId/avatar/color/name) and rank
-  /// (sourced from the leaderboard, not pushed here) are preserved.
-  void _applyStatsDelta(UserStatsDelta delta) {
-    state = state.copyWith(
-      hexCount: delta.hexCount,
-      streak: delta.streak,
-      distanceKm: delta.distanceKm,
-    );
-  }
+  UserProfile build() => const UserProfile();
 
   /// Updates avatar and color together.
   void updateAvatarAndColor(int avatarId, String color) {
@@ -100,36 +66,18 @@ class UserProfileNotifier extends Notifier<UserProfile> {
     api.updateUser(userId: userId, displayName: displayName, avatarId: avatarId, color: color);
   }
 
-  /// Updates game stats (from API response).
-  void updateStats({int? hexCount, int? streak, double? distanceKm, int? rank}) {
-    state = state.copyWith(
-      hexCount: hexCount,
-      streak: streak,
-      distanceKm: distanceKm,
-      rank: rank,
-    );
-  }
-
-  /// Sets the full profile from API data.
+  /// Sets the full identity from API data.
   void setFromApi({
     required String userId,
     required int avatarId,
     required String color,
     required String displayName,
-    required int hexCount,
-    required int streak,
-    required double distanceKm,
-    int rank = 0,
   }) {
     state = UserProfile(
       userId: userId,
       avatarId: avatarId,
       color: color,
       displayName: displayName,
-      hexCount: hexCount,
-      streak: streak,
-      distanceKm: distanceKm,
-      rank: rank,
     );
   }
 

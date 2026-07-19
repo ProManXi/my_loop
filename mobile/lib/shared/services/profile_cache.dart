@@ -27,15 +27,32 @@ import 'package:myloop/shared/services/user_state.dart';
 
 final _log = Logger('ProfileCache');
 
-/// A cached [UserProfile] bound to the [firebaseUid] it was fetched for.
+/// A cached [UserProfile] (identity) plus the last-known game stats, bound to
+/// the [firebaseUid] it was fetched for.
 ///
 /// The binding is what makes offline restore safe: we only restore when this
 /// [firebaseUid] matches the user Firebase Auth currently has signed in.
+///
+/// Stats live directly on [CachedProfile] rather than on [UserProfile]
+/// because `profileSliceProvider`, not `UserProfile`, is their sole owner at
+/// runtime (issue #113) — this cache is just a durable snapshot of both
+/// providers taken together for offline restore.
 class CachedProfile {
   final String firebaseUid;
   final UserProfile profile;
+  final int hexCount;
+  final int streak;
+  final double distanceKm;
+  final int rank;
 
-  const CachedProfile({required this.firebaseUid, required this.profile});
+  const CachedProfile({
+    required this.firebaseUid,
+    required this.profile,
+    this.hexCount = 0,
+    this.streak = 0,
+    this.distanceKm = 0,
+    this.rank = 0,
+  });
 }
 
 /// File-backed store for the last signed-in [CachedProfile]. All methods are
@@ -59,10 +76,10 @@ class ProfileCache {
         'avatarId': c.profile.avatarId,
         'color': c.profile.color,
         'displayName': c.profile.displayName,
-        'hexCount': c.profile.hexCount,
-        'streak': c.profile.streak,
-        'distanceKm': c.profile.distanceKm,
-        'rank': c.profile.rank,
+        'hexCount': c.hexCount,
+        'streak': c.streak,
+        'distanceKm': c.distanceKm,
+        'rank': c.rank,
       });
 
   /// Rebuilds a cached profile from its JSON string form, or `null` if the
@@ -85,11 +102,11 @@ class ProfileCache {
           avatarId: (json['avatarId'] as num?)?.toInt() ?? 0,
           color: json['color'] as String? ?? '#00D4AA',
           displayName: json['displayName'] as String? ?? 'Player',
-          hexCount: (json['hexCount'] as num?)?.toInt() ?? 0,
-          streak: (json['streak'] as num?)?.toInt() ?? 0,
-          distanceKm: (json['distanceKm'] as num?)?.toDouble() ?? 0,
-          rank: (json['rank'] as num?)?.toInt() ?? 0,
         ),
+        hexCount: (json['hexCount'] as num?)?.toInt() ?? 0,
+        streak: (json['streak'] as num?)?.toInt() ?? 0,
+        distanceKm: (json['distanceKm'] as num?)?.toDouble() ?? 0,
+        rank: (json['rank'] as num?)?.toInt() ?? 0,
       );
     } catch (e) {
       _log.warning('Failed to decode cached profile', e);
@@ -97,15 +114,29 @@ class ProfileCache {
     }
   }
 
-  /// Persists [profile] bound to [firebaseUid] so a later offline launch can
-  /// restore it. A profile without a server [UserProfile.userId], or an empty
-  /// [firebaseUid], is never cached — there is nothing to safely restore a
-  /// session from.
-  static Future<void> save(String firebaseUid, UserProfile profile) async {
+  /// Persists [profile] plus its current stats, bound to [firebaseUid], so a
+  /// later offline launch can restore both. A profile without a server
+  /// [UserProfile.userId], or an empty [firebaseUid], is never cached — there
+  /// is nothing to safely restore a session from.
+  static Future<void> save(
+    String firebaseUid,
+    UserProfile profile, {
+    required int hexCount,
+    required int streak,
+    required double distanceKm,
+    required int rank,
+  }) async {
     if (firebaseUid.isEmpty || profile.userId == null) return;
     try {
       final file = await _file();
-      final cached = CachedProfile(firebaseUid: firebaseUid, profile: profile);
+      final cached = CachedProfile(
+        firebaseUid: firebaseUid,
+        profile: profile,
+        hexCount: hexCount,
+        streak: streak,
+        distanceKm: distanceKm,
+        rank: rank,
+      );
       await file.writeAsString(encode(cached), flush: true);
     } catch (e, s) {
       _log.warning('Failed to write profile cache', e, s);

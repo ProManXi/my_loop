@@ -32,11 +32,11 @@ void main() {
           avatarId: 4,
           color: '#6C5CE7',
           displayName: 'Robin',
-          hexCount: 87,
-          streak: 5,
-          distanceKm: 12.5,
-          rank: 3,
         ),
+        hexCount: 87,
+        streak: 5,
+        distanceKm: 12.5,
+        rank: 3,
       );
 
       final restored = ProfileCache.decode(ProfileCache.encode(cached));
@@ -48,10 +48,10 @@ void main() {
       expect(r.profile.avatarId, 4);
       expect(r.profile.color, '#6C5CE7');
       expect(r.profile.displayName, 'Robin');
-      expect(r.profile.hexCount, 87);
-      expect(r.profile.streak, 5);
-      expect(r.profile.distanceKm, 12.5);
-      expect(r.profile.rank, 3);
+      expect(r.hexCount, 87);
+      expect(r.streak, 5);
+      expect(r.distanceKm, 12.5);
+      expect(r.rank, 3);
     });
 
     test('returns null when there is no user id to restore a session from', () {

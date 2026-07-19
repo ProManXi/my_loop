@@ -19,6 +19,7 @@ import 'package:myloop/shared/models/achievement.dart';
 import 'package:myloop/shared/services/api_service.dart';
 import 'package:myloop/shared/services/user_state.dart';
 import 'package:myloop/shared/state/missions_slice.dart';
+import 'package:myloop/shared/state/profile_slice.dart';
 import 'package:myloop/shared/state/xp_slice.dart';
 import 'package:myloop/shared/state/achievements_slice.dart';
 import 'package:myloop/shared/state/exploration_slice.dart';
@@ -147,7 +148,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     final dayIndex = DateTime.now().day % _proTips.length;
     final tip = _proTips[dayIndex];
     final profile = ref.watch(userProfileProvider);
-    final myHexes = profile.hexCount;
+    final myHexes = ref.watch(profileSliceProvider.select((s) => s.hexCount));
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -882,31 +883,31 @@ class _AchievementProgressRow extends StatelessWidget {
 class _QuickStats extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(userProfileProvider);
+    final profile = ref.watch(profileSliceProvider);
     return Row(
       children: [
         Expanded(
           child: _MiniStat(
             emoji: '🔥',
-            value: '${user.streak}',
+            value: '${profile.streak}',
             label: 'Streak',
-            onTap: () => _showStreakHistory(context, user),
+            onTap: () => _showStreakHistory(context, streak: profile.streak, distanceKm: profile.distanceKm),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _MiniStat(
             emoji: '⬡',
-            value: '${user.hexCount}',
+            value: '${profile.hexCount}',
             label: 'Hexes',
-            onTap: () => _showHexHistory(context, user),
+            onTap: () => _showHexHistory(context, profile.hexCount),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _MiniStat(
             emoji: '🏆',
-            value: '#${user.rank}',
+            value: '#${profile.rank}',
             label: 'Rank',
             onTap: () => _showRankSelector(context, ref),
           ),
@@ -916,9 +917,9 @@ class _QuickStats extends ConsumerWidget {
   }
 
   /// Opens a bottom sheet showing the daily streak history.
-  void _showStreakHistory(BuildContext context, UserProfile user) {
-    final currentStreak = user.streak;
-    final isNewUser = user.distanceKm == 0 && currentStreak == 0;
+  void _showStreakHistory(BuildContext context, {required int streak, required double distanceKm}) {
+    final currentStreak = streak;
+    final isNewUser = distanceKm == 0 && currentStreak == 0;
     final streakBroken = !isNewUser && currentStreak == 0;
 
     homeFabVisible.value = false;
@@ -1099,8 +1100,8 @@ class _QuickStats extends ConsumerWidget {
   }
 
   /// Opens a bottom sheet showing hex earned/lost per day + tier scale.
-  void _showHexHistory(BuildContext context, UserProfile user) {
-    final userHexes = user.hexCount;
+  void _showHexHistory(BuildContext context, int hexCount) {
+    final userHexes = hexCount;
     final tier = HexTier.fromHexes(userHexes);
     final division = HexTier.divisionFromHexes(userHexes);
     final divLabel = HexTier.fullLabel(userHexes);
@@ -1240,7 +1241,8 @@ class _QuickStats extends ConsumerWidget {
 
   /// Opens a bottom sheet showing rank at different geographic scopes.
   void _showRankSelector(BuildContext context, WidgetRef ref) {
-    final user = ref.read(userProfileProvider);
+    final userId = ref.read(userProfileProvider).userId;
+    final cityRank = ref.read(profileSliceProvider).rank;
     homeFabVisible.value = false;
     showModalBottomSheet(
       context: context,
@@ -1249,7 +1251,7 @@ class _QuickStats extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) =>
-          _RankSheet(cityRank: user.rank, userId: user.userId),
+          _RankSheet(cityRank: cityRank, userId: userId),
     ).then((_) => homeFabVisible.value = true);
   }
 }
@@ -1893,7 +1895,7 @@ class _InfoReelsState extends ConsumerState<_InfoReels> {
   ];
 
   List<_ReelData> get _reels {
-    final profile = ref.watch(userProfileProvider);
+    final profile = ref.watch(profileSliceProvider);
     return profile.hexCount == 0 && profile.streak == 0
         ? _newUserReels
         : _existingUserReels;

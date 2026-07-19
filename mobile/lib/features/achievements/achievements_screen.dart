@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myloop/app/theme.dart';
 import 'package:myloop/shared/models/achievements.dart';
-import 'package:myloop/shared/services/user_state.dart';
+import 'package:myloop/shared/state/profile_slice.dart';
 import 'package:myloop/shared/widgets/shimmer_loading.dart';
 
 /// The achievements tab showing achievements with lazy pagination.
@@ -32,7 +32,7 @@ class _AchievementsScreenState extends ConsumerState<AchievementsScreen> {
   /// Hex-based achievements use hexCount, walk-based use streak as a proxy.
   /// This will be replaced by a dedicated achievements API later.
   Map<String, int> _getProgress() {
-    final profile = ref.watch(userProfileProvider);
+    final profile = ref.watch(profileSliceProvider);
     return {
       'hex_1': profile.hexCount,
       'hex_2': profile.hexCount,
