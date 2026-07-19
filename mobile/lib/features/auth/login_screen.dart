@@ -19,6 +19,7 @@ import 'package:myloop/shared/services/push_notification_service.dart';
 import 'package:myloop/shared/services/territory_realtime_service.dart';
 import 'package:myloop/shared/services/user_state.dart';
 import 'package:myloop/shared/state/hydration.dart';
+import 'package:myloop/shared/state/profile_slice.dart';
 import 'package:myloop/shared/widgets/big_button.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -247,16 +248,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           avatarId: existing.avatarId,
           color: existing.color,
           displayName: existing.displayName,
+        );
+        // Seed the stats slice immediately so Home/Map paint the correct
+        // numbers before hydrateAllSlices' round trip completes below.
+        ref.read(profileSliceProvider.notifier).applyStats(
+              hexCount: existing.hexCount,
+              streak: existing.streak,
+              distanceKm: existing.distanceKm,
+              rank: rank,
+            );
+        // Cache the profile + stats bound to this Firebase user so a later
+        // offline launch can restore this session instead of bouncing them
+        // back to login (issue #19). Binding to firebaseUid keeps a different
+        // account on the same device from inheriting it offline.
+        await ProfileCache.save(
+          firebaseUid,
+          ref.read(userProfileProvider),
           hexCount: existing.hexCount,
           streak: existing.streak,
           distanceKm: existing.distanceKm,
           rank: rank,
         );
-        // Cache the profile bound to this Firebase user so a later offline
-        // launch can restore this session instead of bouncing them back to
-        // login (issue #19). Binding to firebaseUid keeps a different account
-        // on the same device from inheriting it offline.
-        await ProfileCache.save(firebaseUid, ref.read(userProfileProvider));
 
         // Initialize push notifications after login
         ref.read(pushNotificationProvider).initialize(existing.id);
@@ -328,10 +340,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           avatarId: profile.avatarId,
           color: profile.color,
           displayName: profile.displayName,
-          hexCount: profile.hexCount,
-          streak: profile.streak,
-          distanceKm: profile.distanceKm,
-          rank: profile.rank,
+        );
+    ref.read(profileSliceProvider.notifier).applyStats(
+          hexCount: cached.hexCount,
+          streak: cached.streak,
+          distanceKm: cached.distanceKm,
+          rank: cached.rank,
         );
 
     // Report success only if we actually navigated; if the widget was disposed
@@ -357,11 +371,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           avatarId: user.avatarId,
           color: user.color,
           displayName: user.displayName,
-          hexCount: user.hexCount,
-          streak: user.streak,
-          distanceKm: user.distanceKm,
-          rank: rank,
         );
+        ref.read(profileSliceProvider.notifier).applyStats(
+              hexCount: user.hexCount,
+              streak: user.streak,
+              distanceKm: user.distanceKm,
+              rank: rank,
+            );
 
         // Connect SignalR + hydrate slices
         final token = await fb.FirebaseAuth.instance.currentUser?.getIdToken();

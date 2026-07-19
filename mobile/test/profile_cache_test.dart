@@ -16,11 +16,11 @@ void main() {
           avatarId: 4,
           color: '#123456',
           displayName: 'Walker',
-          hexCount: 12,
-          streak: 5,
-          distanceKm: 3.5,
-          rank: 7,
         ),
+        hexCount: 12,
+        streak: 5,
+        distanceKm: 3.5,
+        rank: 7,
       );
 
   group('encode/decode round trip', () {
@@ -33,10 +33,10 @@ void main() {
       expect(decoded.profile.avatarId, 4);
       expect(decoded.profile.color, '#123456');
       expect(decoded.profile.displayName, 'Walker');
-      expect(decoded.profile.hexCount, 12);
-      expect(decoded.profile.streak, 5);
-      expect(decoded.profile.distanceKm, 3.5);
-      expect(decoded.profile.rank, 7);
+      expect(decoded.hexCount, 12);
+      expect(decoded.streak, 5);
+      expect(decoded.distanceKm, 3.5);
+      expect(decoded.rank, 7);
     });
   });
 
@@ -67,10 +67,10 @@ void main() {
       expect(decoded!.profile.avatarId, 0);
       expect(decoded.profile.color, '#00D4AA');
       expect(decoded.profile.displayName, 'Player');
-      expect(decoded.profile.hexCount, 0);
-      expect(decoded.profile.streak, 0);
-      expect(decoded.profile.distanceKm, 0);
-      expect(decoded.profile.rank, 0);
+      expect(decoded.hexCount, 0);
+      expect(decoded.streak, 0);
+      expect(decoded.distanceKm, 0);
+      expect(decoded.rank, 0);
     });
   });
 }

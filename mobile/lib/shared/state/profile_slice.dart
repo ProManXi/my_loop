@@ -74,7 +74,7 @@ class ProfileSlice extends Notifier<ProfileState> {
 
   /// Full hydration from game-state endpoint (login / app resume).
   void hydrate(Map<String, dynamic> data) {
-    state = ProfileState(
+    applyStats(
       hexCount: data['hexCount'] as int? ?? 0,
       totalHexesCaptured: data['totalHexesCaptured'] as int? ?? 0,
       totalHexesStolen: data['totalHexesStolen'] as int? ?? 0,
@@ -82,6 +82,30 @@ class ProfileSlice extends Notifier<ProfileState> {
       isStreakActive: data['isStreakActive'] as bool? ?? false,
       distanceKm: (data['distanceKm'] as num?)?.toDouble() ?? 0,
       rank: data['rank'] as int? ?? 0,
+    );
+  }
+
+  /// Sets every stat field at once — the typed counterpart to [hydrate] for
+  /// callers that already have parsed values (e.g. seeding from a freshly
+  /// fetched `User`, or restoring from `ProfileCache` while offline) rather
+  /// than a raw game-state JSON map.
+  void applyStats({
+    int hexCount = 0,
+    int totalHexesCaptured = 0,
+    int totalHexesStolen = 0,
+    int streak = 0,
+    bool isStreakActive = false,
+    double distanceKm = 0,
+    int rank = 0,
+  }) {
+    state = ProfileState(
+      hexCount: hexCount,
+      totalHexesCaptured: totalHexesCaptured,
+      totalHexesStolen: totalHexesStolen,
+      streak: streak,
+      isStreakActive: isStreakActive,
+      distanceKm: distanceKm,
+      rank: rank,
       isLoaded: true,
     );
   }

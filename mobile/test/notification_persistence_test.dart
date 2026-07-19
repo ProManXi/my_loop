@@ -32,9 +32,6 @@ ProviderContainer _containerForUser(String userId) {
         avatarId: 1,
         color: '#FF0000',
         displayName: 'Robin',
-        hexCount: 0,
-        streak: 0,
-        distanceKm: 0,
       );
   return c;
 }

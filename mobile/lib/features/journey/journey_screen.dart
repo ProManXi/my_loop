@@ -137,22 +137,16 @@ class _JourneyScreenState extends ConsumerState<JourneyScreen> {
     // Re-hydrate all slices (single API call) — SignalR may already have
     // pushed deltas, but this ensures consistency for the celebration dialog.
     await hydrateAllSlices(ref);
-    final ps = ref.read(profileSliceProvider);
 
-    int updatedRank = profile.rank;
+    int updatedRank = ref.read(profileSliceProvider).rank;
     try {
       await api.refreshLeaderboard();
       final lb = await api.getLeaderboard(lat: 0, lng: 0, userId: profile.userId!, scope: 'city');
-      updatedRank = lb.myRank ?? profile.rank;
+      updatedRank = lb.myRank ?? updatedRank;
     } catch (_) {}
 
     if (mounted) {
-      ref.read(userProfileProvider.notifier).updateStats(
-        hexCount: ps.hexCount,
-        streak: ps.streak,
-        distanceKm: ps.distanceKm,
-        rank: updatedRank,
-      );
+      ref.read(profileSliceProvider.notifier).updateRank(updatedRank);
     }
   }
 
@@ -575,11 +569,13 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
 
     final center = _resolveCenter(journey);
 
+    final hexCount = ref.watch(profileSliceProvider.select((s) => s.hexCount));
+
     return Stack(
       children: [
         _buildMap(center, journey, profile, userColor),
         if (!_followUser) _buildRecenterButton(),
-        _buildTopRightControls(context, profile, userColor),
+        _buildTopRightControls(context, hexCount, userColor),
       ],
     );
   }
@@ -815,7 +811,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
     );
   }
 
-  Widget _buildTopRightControls(BuildContext context, dynamic profile, Color userColor) {
+  Widget _buildTopRightControls(BuildContext context, int hexCount, Color userColor) {
     return Positioned(
       top: MediaQuery.of(context).padding.top + 12,
       right: 16,
@@ -838,7 +834,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
               children: [
                 Icon(Icons.hexagon, color: userColor, size: 18),
                 const SizedBox(width: 4),
-                Text('${profile.hexCount}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.dark)),
+                Text('$hexCount', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.dark)),
               ],
             ),
           ),

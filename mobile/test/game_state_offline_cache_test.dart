@@ -72,9 +72,6 @@ ProviderContainer _containerWith(ApiService api, String userId) {
         avatarId: 0,
         color: '#000000',
         displayName: 'Player',
-        hexCount: 0,
-        streak: 0,
-        distanceKm: 0,
       );
   return container;
 }
