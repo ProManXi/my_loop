@@ -261,10 +261,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         // Initialize push notifications after login
         ref.read(pushNotificationProvider).initialize(existing.id);
 
-        // Connect SignalR with auth token for personal event group
-        final token = await fb.FirebaseAuth.instance.currentUser?.getIdToken();
+        // Connect SignalR with auth token for personal event group. A
+        // provider (not a point-in-time string) so an automatic reconnect
+        // after the ~1h token expiry fetches a fresh one instead of failing
+        // auth silently (#102).
         await ref.read(territoryRealtimeProvider).connect(
-          token: token,
+          tokenProvider: () => fb.FirebaseAuth.instance.currentUser?.getIdToken(),
           userId: existing.id,
         );
 
@@ -364,9 +366,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
 
         // Connect SignalR + hydrate slices
-        final token = await fb.FirebaseAuth.instance.currentUser?.getIdToken();
         await ref.read(territoryRealtimeProvider).connect(
-          token: token,
+          tokenProvider: () => fb.FirebaseAuth.instance.currentUser?.getIdToken(),
           userId: user.id,
         );
         await hydrateAllSlices(ref);
