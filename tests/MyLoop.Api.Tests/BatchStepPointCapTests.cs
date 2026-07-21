@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MyLoop.Api.Constants;
@@ -42,7 +43,7 @@ public class BatchStepPointCapTests
             Mock.Of<IPushNotificationService>(),
             new GeocodingService(new HttpClient(), NullLogger<GeocodingService>.Instance),
             Mock.Of<IMissionService>(), Mock.Of<IAchievementService>(),
-            NullLogger<TerritoryService>.Instance);
+            Mock.Of<IServiceScopeFactory>(), NullLogger<TerritoryService>.Instance);
 
         var oversized = Enumerable.Range(0, GameConstants.MaxBatchStepPoints + 1)
             .Select(i => new BatchStepPoint

@@ -1,5 +1,6 @@
 using System.Net.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MyLoop.Api.Constants;
@@ -51,6 +52,7 @@ public class HexHistoryImmutableTests : IAsyncLifetime
         new GeocodingService(new HttpClient(), NullLogger<GeocodingService>.Instance),
         Mock.Of<IMissionService>(),
         Mock.Of<IAchievementService>(),
+        Mock.Of<IServiceScopeFactory>(),
         NullLogger<TerritoryService>.Instance);
 
     private static Claim NewClaim(Guid userId, int cellCount, DateTime createdAt) => new()

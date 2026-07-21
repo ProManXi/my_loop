@@ -106,7 +106,12 @@ public class GeocodingService
         return value;
     }
 
-    private static string FallbackName(double lat, double lng)
+    /// <summary>
+    /// The "Area (lat, lng)" placeholder used when Nominatim is unreachable. Also exposed to
+    /// callers (e.g. <see cref="TerritoryService.GetExplorationStats"/>) that need an immediate
+    /// name without waiting on a geocode call at all.
+    /// </summary>
+    public static string FallbackName(double lat, double lng)
         => $"Area ({lat:F2}, {lng:F2})";
 
     /// <summary>

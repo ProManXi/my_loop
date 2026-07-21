@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MyLoop.Api.Constants;
@@ -91,7 +92,7 @@ public class DecayNoGeocodingTests : IAsyncLifetime
         return new TerritoryService(
             db, hex.Object, geo.Object, notifier.Object, Mock.Of<IPathValidationService>(),
             push.Object, ThrowingGeocoder(),
-            missions.Object, achievements.Object, NullLogger<TerritoryService>.Instance);
+            missions.Object, achievements.Object, Mock.Of<IServiceScopeFactory>(), NullLogger<TerritoryService>.Instance);
     }
 
     private async Task SeedUserWithFarHome(Guid userId)

@@ -41,6 +41,7 @@ public static class DbInitializer
             ApplyDecayAndMissionsSchema(db);
             ApplyAchievementsSchema(db);
             ApplyTerritoryIndexes(db);
+            ApplyNeighborhoodNamesSchema(db);
         }
         catch (Exception ex)
         {
@@ -213,5 +214,18 @@ public static class DbInitializer
         db.Database.ExecuteSqlRaw(@"
             CREATE INDEX IF NOT EXISTS ""IX_TerritoryCells_Decay""
             ON ""TerritoryCells"" (""LastRefreshedAt"", ""DecayDays"")");
+    }
+
+    // Persisted, shared-across-all-users reverse-geocode cache (#121 / ML-ERR-024) — lets
+    // /game-state's exploration stats return without ever awaiting Nominatim inline.
+    private static void ApplyNeighborhoodNamesSchema(AppDbContext db)
+    {
+        db.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS ""NeighborhoodNames"" (
+                ""NeighborhoodId"" bigint NOT NULL,
+                ""AreaName"" text NOT NULL,
+                ""ResolvedAt"" timestamp with time zone NOT NULL,
+                CONSTRAINT ""PK_NeighborhoodNames"" PRIMARY KEY (""NeighborhoodId"")
+            )");
     }
 }
