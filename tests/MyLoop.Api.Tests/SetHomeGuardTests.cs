@@ -67,6 +67,7 @@ public class SetHomeGuardTests : IAsyncLifetime
         return new UsersController(
             Mock.Of<IUserService>(), Mock.Of<IValidationService>(),
             Mock.Of<IPushNotificationService>(), geocoding, db, currentUser.Object,
+            Mock.Of<IMissionService>(), Mock.Of<IAchievementService>(), Mock.Of<ITerritoryService>(),
             NullLogger<UsersController>.Instance);
     }
 

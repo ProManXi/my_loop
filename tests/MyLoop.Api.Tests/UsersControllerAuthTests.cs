@@ -5,6 +5,7 @@ using MyLoop.Api.Controllers;
 using MyLoop.Api.Entities;
 using MyLoop.Api.Interfaces;
 using MyLoop.Api.Models;
+using MyLoop.Api.Services;
 using Xunit;
 
 namespace MyLoop.Api.Tests;
@@ -24,7 +25,9 @@ public class UsersControllerAuthTests
         Mock<IPushNotificationService> push,
         Mock<ICurrentUser> currentUser) =>
         new(users.Object, Mock.Of<IValidationService>(), push.Object,
-            geocoding: null!, db: null!, currentUser.Object, NullLogger<UsersController>.Instance);
+            geocoding: null!, db: null!, currentUser.Object,
+            Mock.Of<IMissionService>(), Mock.Of<IAchievementService>(), Mock.Of<ITerritoryService>(),
+            NullLogger<UsersController>.Instance);
 
     [Fact]
     public async Task DeleteAccount_for_another_user_is_forbidden_and_deletes_nothing()

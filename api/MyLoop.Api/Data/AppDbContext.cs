@@ -43,6 +43,9 @@ public class AppDbContext : DbContext
     /// <summary>Gets the set of unlocked achievements per user.</summary>
     public DbSet<UserAchievement> UserAchievements => Set<UserAchievement>();
 
+    /// <summary>Gets the set of persisted reverse-geocode results, one row per H3 neighborhood.</summary>
+    public DbSet<NeighborhoodName> NeighborhoodNames => Set<NeighborhoodName>();
+
     /// <summary>
     /// Configures the entity model: primary keys, unique constraints, and indexes
     /// for efficient query patterns used by the game.
@@ -103,6 +106,12 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(a => a.UserId); // fast: "all achievements for user"
             e.HasIndex(a => new { a.UserId, a.AchievementId }).IsUnique(); // prevent duplicates
+        });
+
+        // NeighborhoodName: one persisted reverse-geocode result per neighborhood, shared by all users
+        modelBuilder.Entity<NeighborhoodName>(e =>
+        {
+            e.HasKey(n => n.NeighborhoodId);
         });
     }
 }

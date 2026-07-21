@@ -22,11 +22,16 @@ public class UsersController : ControllerBase
     private readonly GeocodingService _geocoding;
     private readonly AppDbContext _db;
     private readonly ICurrentUser _currentUser;
+    private readonly IMissionService _missionService;
+    private readonly IAchievementService _achievementService;
+    private readonly ITerritoryService _territoryService;
     private readonly ILogger<UsersController> _logger;
 
     public UsersController(IUserService userService, IValidationService validation,
         IPushNotificationService pushService, GeocodingService geocoding, AppDbContext db,
-        ICurrentUser currentUser, ILogger<UsersController> logger)
+        ICurrentUser currentUser, IMissionService missionService,
+        IAchievementService achievementService, ITerritoryService territoryService,
+        ILogger<UsersController> logger)
     {
         _userService = userService;
         _validation = validation;
@@ -34,6 +39,9 @@ public class UsersController : ControllerBase
         _geocoding = geocoding;
         _db = db;
         _currentUser = currentUser;
+        _missionService = missionService;
+        _achievementService = achievementService;
+        _territoryService = territoryService;
         _logger = logger;
     }
 
@@ -337,27 +345,23 @@ public class UsersController : ControllerBase
         var neededXp = nextLevelXp - currentLevelXp;
 
         // Missions
-        var missionService = HttpContext.RequestServices.GetRequiredService<IMissionService>();
-        var missions = await missionService.GetTodaysMissions(id, GameDay.Resolve(localDate));
+        var missions = await _missionService.GetTodaysMissions(id, GameDay.Resolve(localDate));
 
         // Achievements
-        var achievementService = HttpContext.RequestServices.GetRequiredService<IAchievementService>();
-        var achievements = await achievementService.GetAllForUser(id);
+        var achievements = await _achievementService.GetAllForUser(id);
 
         // Exploration
-        var territoryService = HttpContext.RequestServices.GetRequiredService<ITerritoryService>();
-        var exploration = await territoryService.GetExplorationStats(id, 0, 0);
+        var exploration = await _territoryService.GetExplorationStats(id, 0, 0);
 
-        // Rank (city leaderboard)
+        // Rank (city leaderboard) — count of users strictly ahead, not a full city roster load.
+        // Ties share a rank (two users with the same HexCount both get the same number), matching
+        // LeaderboardService.ResolveUserRank's convention.
         int rank = 0;
         try
         {
-            var leaderboard = await _db.Users
-                .Where(u => u.City == user.City && !string.IsNullOrEmpty(u.City))
-                .OrderByDescending(u => u.HexCount)
-                .Select(u => u.Id)
-                .ToListAsync();
-            rank = leaderboard.IndexOf(id) + 1;
+            var higherCount = await _db.Users
+                .CountAsync(u => u.City == user.City && !string.IsNullOrEmpty(u.City) && u.HexCount > user.HexCount);
+            rank = higherCount + 1;
         }
         catch (Exception ex)
         {

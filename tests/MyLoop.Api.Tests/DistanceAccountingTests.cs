@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MyLoop.Api.Data;
@@ -69,7 +70,7 @@ public class DistanceAccountingTests : IAsyncLifetime
         return new TerritoryService(
             db, hex.Object, geo.Object, notifier.Object, Mock.Of<IPathValidationService>(),
             push.Object, new GeocodingService(new HttpClient(), NullLogger<GeocodingService>.Instance),
-            missions.Object, achievements.Object, NullLogger<TerritoryService>.Instance);
+            missions.Object, achievements.Object, Mock.Of<IServiceScopeFactory>(), NullLogger<TerritoryService>.Instance);
     }
 
     [Fact]
