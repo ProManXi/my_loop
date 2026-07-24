@@ -136,4 +136,87 @@ void main() {
       expect(manager.otherHexesByColor[p2Color], isNull);
     });
   });
+
+  group('single keyed store (issue #112)', () {
+    test('steal event removes exactly the one cell with matching id, '
+        'even when an adjacent cell shares its centroid', () {
+      // Two distinct, adjacent hexes whose vertex-averaged centroids coincide
+      // exactly at (10.0005, 20.0005) — the scenario centroid-distance
+      // matching cannot disambiguate, but a cellId-keyed lookup can.
+      final boundaryA = [
+        [10.0000, 20.0000],
+        [10.0010, 20.0000],
+        [10.0010, 20.0010],
+        [10.0000, 20.0010],
+      ];
+      final boundaryB = [
+        [10.0004, 20.0004],
+        [10.0006, 20.0004],
+        [10.0006, 20.0006],
+        [10.0004, 20.0006],
+      ];
+      final manager = newManager();
+      manager.updateFromCells([
+        cell(601, p1, p1Color, hexBoundary: boundaryA),
+        cell(602, p1, p1Color, hexBoundary: boundaryB),
+      ]);
+      expect(manager.otherHexesByColor[p1Color], hasLength(2));
+
+      final changed = manager.applyRealtimeChanges([
+        HexChangeEvent(
+          h3Index: '601',
+          centerLat: 10.0005,
+          centerLng: 20.0005,
+          newOwnerId: p2,
+          newOwnerColor: p2Color,
+          newOwnerDisplayName: p2,
+          previousOwnerId: p1,
+        ),
+      ]);
+
+      expect(changed, isTrue);
+      final untouched = manager.allCells.singleWhere((c) => c.cellId == 602);
+      expect(untouched.ownerId, p1, reason: 'adjacent cell 602 was not touched');
+      expect(untouched.boundary, boundaryB);
+      final stolen = manager.allCells.singleWhere((c) => c.cellId == 601);
+      expect(stolen.ownerId, p2);
+      expect(stolen.boundary, boundaryA, reason: 'the correct cell\'s own boundary moved');
+      expect(manager.otherHexesByColor[p1Color], hasLength(1),
+          reason: 'only cell 602 remains under the old owner');
+      expect(manager.otherHexesByColor[p2Color], hasLength(1));
+    });
+
+    test('integrateStepClaim is idempotent for the same cellId', () {
+      final manager = newManager();
+      manager.integrateStepClaim(boundary, 601, false);
+      manager.integrateStepClaim(boundary, 601, false);
+
+      expect(manager.userOwnCellIds, hasLength(1));
+      expect(manager.userOwnHexBoundaries, hasLength(1));
+      expect(manager.userOwnDecayValues, hasLength(1));
+    });
+
+    test('addCapturedHexes can never desync boundaries from decay values', () {
+      final manager = newManager();
+      manager.addCapturedHexes([boundary, farBoundary]);
+
+      // Previously boundaries were appended to a side list with no
+      // corresponding decay entry; both are now derived from the same keyed
+      // store, so their lengths can't drift apart.
+      expect(manager.userOwnHexBoundaries, hasLength(2));
+      expect(manager.userOwnDecayValues, hasLength(2));
+      expect(manager.userOwnDecayValues, everyElement(0.0));
+
+      // A realtime event removing one of the (synthetic-id) captured hexes
+      // must not throw despite the synthetic id never being sent by the
+      // server — it simply won't match any event and is a safe no-op.
+      expect(
+        () => manager.applyRealtimeChanges(
+            [event(newOwnerId: p2, newOwnerColor: p2Color, previousOwnerId: me)]),
+        returnsNormally,
+      );
+      expect(manager.userOwnHexBoundaries, hasLength(2));
+      expect(manager.userOwnDecayValues, hasLength(2));
+    });
+  });
 }
