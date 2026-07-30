@@ -211,8 +211,9 @@ class _ProfileDrawer extends ConsumerWidget {
             iconColor: AppColors.red,
             onTap: () async {
               Navigator.pop(context);
+              final uid = ref.read(userProfileProvider).userId;
               ref.read(userProfileProvider.notifier).clear();
-              await ref.read(authServiceProvider).signOut();
+              await ref.read(authServiceProvider).signOut(uid);
               if (context.mounted) context.go('/login');
             },
           ),

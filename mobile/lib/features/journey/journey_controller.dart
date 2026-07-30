@@ -268,7 +268,7 @@ class JourneyController extends Notifier<JourneyState> {
     if (userId == null) return;
 
     _queue = StepClaimQueue();
-    await _queue!.init();
+    await _queue!.init(userId);
 
     final api = ref.read(apiServiceProvider);
     _drainService = BatchDrainService(
