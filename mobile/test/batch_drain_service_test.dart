@@ -66,7 +66,7 @@ void main() {
 
   Future<StepClaimQueue> queueWith(int count, {String session = 'walk-1'}) async {
     final q = StepClaimQueue();
-    await q.init();
+    await q.init('u1');
     for (var i = 0; i < count; i++) {
       await q.enqueue(_pt('p$i', session: session));
     }

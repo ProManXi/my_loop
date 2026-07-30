@@ -15,7 +15,12 @@ final _log = Logger('StepClaimQueue');
 ///
 /// Thread-safety: all writes are serialized via [_writeLock].
 class StepClaimQueue {
-  static const _fileName = 'step_claim_queue.jsonl';
+  /// Pre-#110 filename, shared across every account on the device. A queue
+  /// keyed by this name survives sign-out, so the next account's drain could
+  /// submit the previous account's leftover GPS points as its own territory
+  /// claims. Deleted (never migrated — see [init]) the first time any account
+  /// initializes a queue on an app build that has this fix.
+  static const _legacyFileName = 'step_claim_queue.jsonl';
 
   File? _file;
   List<QueuedStepPoint>? _cache;
@@ -43,15 +48,40 @@ class StepClaimQueue {
     return completer.future;
   }
 
-  /// Initialize the queue (resolves app documents directory).
-  Future<void> init() async {
+  /// Initialize the queue for [userId] (resolves app documents directory).
+  ///
+  /// The WAL file is keyed by [userId] so one account's queue can never be
+  /// drained under a different account's session (#110) — even if a caller
+  /// forgets to [clear] on sign-out, the next account's [init] opens a
+  /// distinct, empty file rather than inheriting this one's contents.
+  Future<void> init(String userId) async {
     final dir = await getApplicationDocumentsDirectory();
-    _file = File('${dir.path}/$_fileName');
+    await _deleteLegacyFile(dir);
+    _file = File('${dir.path}/step_claim_queue_${_sanitize(userId)}.jsonl');
     if (!await _file!.exists()) {
       await _file!.create(recursive: true);
     }
     _cache = await _readAll();
   }
+
+  /// One-time migration off the pre-#110 shared filename: deleted rather than
+  /// attributed to whichever account happens to init next, since that account
+  /// may not be the one that wrote it.
+  Future<void> _deleteLegacyFile(Directory dir) async {
+    final legacy = File('${dir.path}/$_legacyFileName');
+    if (await legacy.exists()) {
+      try {
+        await legacy.delete();
+      } catch (e) {
+        _log.warning('Failed to delete legacy step-claim queue file', e);
+      }
+    }
+  }
+
+  /// Keeps the on-disk filename limited to characters that are safe across
+  /// filesystems, in case a userId ever contains a path separator or similar.
+  static String _sanitize(String userId) =>
+      userId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
 
   /// Enqueue a GPS point for later batch submission.
   Future<void> enqueue(QueuedStepPoint point) => _synchronized(() async {

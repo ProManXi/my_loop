@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -41,7 +42,7 @@ void main() {
 
   test('enqueue/peek/removeProcessed roundtrip survives a reopen', () async {
     final q = StepClaimQueue();
-    await q.init();
+    await q.init('user-a');
 
     await q.enqueue(_pt('a'));
     await q.enqueue(_pt('b'));
@@ -55,7 +56,7 @@ void main() {
 
     // The WAL on disk must agree with memory after a removal.
     final reopened = StepClaimQueue();
-    await reopened.init();
+    await reopened.init('user-a');
     expect(reopened.getAll().map((p) => p.clientId), ['a', 'c']);
   });
 
@@ -64,12 +65,12 @@ void main() {
   // lose the correlation and re-fragment the walk.
   test('walkSessionId round-trips through the on-disk WAL', () async {
     final q = StepClaimQueue();
-    await q.init();
+    await q.init('user-a');
     await q.enqueue(_pt('a', session: 'walk-1'));
     await q.enqueue(_pt('b', session: 'walk-2'));
 
     final reopened = StepClaimQueue();
-    await reopened.init();
+    await reopened.init('user-a');
     expect(
       reopened.getAll().map((p) => p.walkSessionId),
       ['walk-1', 'walk-2'],
@@ -91,15 +92,62 @@ void main() {
 
   test('clear empties both memory and the on-disk WAL', () async {
     final q = StepClaimQueue();
-    await q.init();
+    await q.init('user-a');
     await q.enqueue(_pt('a'));
     await q.clear();
 
     expect(q.isEmpty, isTrue);
 
     final reopened = StepClaimQueue();
-    await reopened.init();
+    await reopened.init('user-a');
     expect(reopened.isEmpty, isTrue);
+  });
+
+  // #110: the WAL used to be one file shared by every account on the device,
+  // so signing out mid-walk left user A's undrained GPS points sitting in the
+  // queue for whichever account signed in next — user B's BatchDrainService
+  // would submit them as B's own territory claims, at A's real-world location.
+  test('signing out user A and initializing as user B never sees A\'s queued points',
+      () async {
+    final a = StepClaimQueue();
+    await a.init('user-a');
+    await a.enqueue(_pt('a-1'));
+    await a.enqueue(_pt('a-2'));
+    expect(a.length, 2);
+
+    // Simulate AuthService.signOut(userId) clearing the outgoing account's WAL.
+    await a.clear();
+
+    final b = StepClaimQueue();
+    await b.init('user-b');
+    expect(b.isEmpty, isTrue,
+        reason: 'user B must start with an empty queue, not user A\'s leftover points');
+    await b.enqueue(_pt('b-1'));
+
+    // Re-opening user A's own queue confirms the sign-out clear reached disk,
+    // not just memory, and that it's still a distinct file from B's.
+    final aReopened = StepClaimQueue();
+    await aReopened.init('user-a');
+    expect(aReopened.isEmpty, isTrue);
+    expect(b.getAll().map((p) => p.clientId), ['b-1']);
+  });
+
+  test('a legacy shared-file WAL from a pre-fix build is discarded, not inherited',
+      () async {
+    // Simulate a pre-#110 build's leftover shared file sitting in app documents.
+    final legacy = File('${tmp.path}/step_claim_queue.jsonl');
+    await legacy.writeAsString(
+      '${jsonEncode(_pt('leftover-from-old-build').toJson())}\n',
+    );
+
+    final q = StepClaimQueue();
+    await q.init('user-a');
+
+    expect(q.isEmpty, isTrue,
+        reason: 'the legacy shared queue must never be attributed to whichever '
+            'account happens to init next');
+    expect(await legacy.exists(), isFalse,
+        reason: 'the legacy file should be deleted, not left around to leak later');
   });
 
   // Regression for the StepClaimQueue write-lock (PR #17): an [enqueue] append
@@ -114,7 +162,7 @@ void main() {
       () async {
     for (var i = 0; i < 25; i++) {
       final q = StepClaimQueue();
-      await q.init();
+      await q.init('user-a');
       await q.clear();
       await q.enqueue(_pt('seed'));
 
@@ -127,7 +175,7 @@ void main() {
       ]);
 
       final reopened = StepClaimQueue();
-      await reopened.init();
+      await reopened.init('user-a');
 
       expect(
         reopened.getAll().map((p) => p.clientId).toSet(),
