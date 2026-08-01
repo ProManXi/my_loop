@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 import 'package:signalr_netcore/signalr_client.dart';
@@ -155,6 +156,7 @@ class TerritoryRealtimeService {
   final _xpController = StreamController<XpDelta>.broadcast();
   final _missionController = StreamController<MissionDelta>.broadcast();
   final _achievementController = StreamController<AchievementDelta>.broadcast();
+  final _reconnectedController = StreamController<void>.broadcast();
   final Set<String> _subscribedRegions = {};
   bool _isConnected = false;
   String? _userId;
@@ -167,6 +169,12 @@ class TerritoryRealtimeService {
   Stream<XpDelta> get onXp => _xpController.stream;
   Stream<MissionDelta> get onMissions => _missionController.stream;
   Stream<AchievementDelta> get onAchievements => _achievementController.stream;
+
+  /// Fires after every successful reconnect, once regions/groups have been
+  /// re-joined. Missed deltas during the outage are never replayed by the
+  /// hub, so listeners must treat this as "re-fetch your snapshot now"
+  /// (see docs/architecture/realtime.md — reconnect & resync).
+  Stream<void> get onReconnected => _reconnectedController.stream;
 
   bool get isConnected => _isConnected;
 
@@ -201,11 +209,7 @@ class TerritoryRealtimeService {
       _log.warning('Connection closed: $error');
     });
 
-    _hubConnection!.onreconnected(({connectionId}) {
-      _isConnected = true;
-      _log.info('Reconnected: $connectionId');
-      _resubscribeAll();
-    });
+    _hubConnection!.onreconnected(({connectionId}) => handleReconnected(connectionId: connectionId));
 
     try {
       await _hubConnection!.start();
@@ -271,6 +275,7 @@ class TerritoryRealtimeService {
     _xpController.close();
     _missionController.close();
     _achievementController.close();
+    _reconnectedController.close();
   }
 
   // ── Event handlers ──
@@ -320,6 +325,18 @@ class TerritoryRealtimeService {
     if (raw is! Map<String, dynamic>) return;
     _achievementController.add(AchievementDelta.fromJson(raw));
     _log.fine('AchievementUnlocked received');
+  }
+
+  /// Handles a hub reconnect: re-joins groups, then notifies [onReconnected]
+  /// listeners so they re-fetch their snapshot. Extracted from the
+  /// `onreconnected` hub callback (rather than inlined) so it can be invoked
+  /// directly in tests without a live hub connection.
+  @visibleForTesting
+  Future<void> handleReconnected({String? connectionId}) async {
+    _isConnected = true;
+    _log.info('Reconnected: $connectionId');
+    await _resubscribeAll();
+    _reconnectedController.add(null);
   }
 
   Future<void> _resubscribeAll() async {
