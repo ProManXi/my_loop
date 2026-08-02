@@ -1,6 +1,9 @@
+using Firebase = FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.EntityFrameworkCore;
 using MyLoop.Api.Constants;
 using MyLoop.Api.Data;
+using MyLoop.Api.Interfaces;
 using MyLoop.Api.Services;
 
 namespace MyLoop.Api.Configuration;
@@ -52,6 +55,40 @@ public static class ServiceRegistrationExtensions
         services.AddHttpContextAccessor();
         services.AddMemoryCache();
         services.AddScoped<ICurrentUser, CurrentUser>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the FCM sender used by <see cref="PushNotificationService"/>. Real Firebase
+    /// delivery (<see cref="FirebaseFcmSender"/>) is wired up only when <c>Push:Enabled</c> is
+    /// true and a service-account credential path is configured; otherwise
+    /// <see cref="LoggingFcmSender"/> is registered so the app runs (and CI/local dev build and
+    /// test) without live Firebase credentials.
+    /// </summary>
+    public static IServiceCollection AddMyLoopPushNotifications(this IServiceCollection services, IConfiguration configuration)
+    {
+        var enabled = configuration.GetValue<bool>(InfrastructureDefaults.PushEnabledConfigKey);
+        var serviceAccountPath = configuration[InfrastructureDefaults.PushFirebaseServiceAccountPathConfigKey];
+
+        if (enabled && !string.IsNullOrWhiteSpace(serviceAccountPath))
+        {
+            // FirebaseApp.Create throws if a default app already exists (e.g. a second host build
+            // within the same test process); guard so registration stays idempotent.
+            if (Firebase.FirebaseApp.DefaultInstance == null)
+            {
+                Firebase.FirebaseApp.Create(new Firebase.AppOptions
+                {
+                    Credential = GoogleCredential.FromFile(serviceAccountPath),
+                });
+            }
+
+            services.AddSingleton<IFcmSender, FirebaseFcmSender>();
+        }
+        else
+        {
+            services.AddSingleton<IFcmSender, LoggingFcmSender>();
+        }
+
         return services;
     }
 }

@@ -55,4 +55,10 @@ public static class InfrastructureDefaults
     public const string DefaultFirebaseProjectId = "myloop-6aefc";
     /// <summary>Authority/issuer template; the audience is the project id itself.</summary>
     public const string FirebaseAuthorityFormat = "https://securetoken.google.com/{0}";
+
+    // --- FCM push notifications (#103 / ML-ERR-006) ---
+    /// <summary>Feature flag config key; false (the default) keeps push notifications log-only.</summary>
+    public const string PushEnabledConfigKey = "Push:Enabled";
+    /// <summary>Config key for the Firebase service-account JSON path; set via the gitignored appsettings.Development.json locally, or a deployment secret in production.</summary>
+    public const string PushFirebaseServiceAccountPathConfigKey = "Push:Firebase:ServiceAccountPath";
 }
