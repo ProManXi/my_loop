@@ -8,6 +8,7 @@ builder.Host.AddMyLoopSerilog();
 builder.Services
     .AddMyLoopDatabase(builder.Configuration)
     .AddMyLoopServices()
+    .AddMyLoopPushNotifications(builder.Configuration)
     .AddMyLoopAuthentication(builder.Configuration)
     .AddMyLoopRateLimiting()
     .AddMyLoopCors(builder.Configuration);
