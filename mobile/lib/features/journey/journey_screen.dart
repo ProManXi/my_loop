@@ -333,6 +333,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
   List<List<List<double>>> _capturedHexBoundaries = [];
   late HexTerritoryManager _hexManager;
   StreamSubscription<List<HexChangeEvent>>? _realtimeSub;
+  StreamSubscription<void>? _reconnectSub;
 
   @override
   void initState() {
@@ -353,6 +354,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
     _locationTimer?.cancel();
     _hexRefreshTimer?.cancel();
     _realtimeSub?.cancel();
+    _reconnectSub?.cancel();
     ref.read(territoryRealtimeProvider).disconnect();
     _mapController.dispose();
     super.dispose();
@@ -361,6 +363,15 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
   void _connectRealtime() {
     final realtimeService = ref.read(territoryRealtimeProvider);
     realtimeService.connect();
+    // Missed hex-ownership deltas during a disconnect are never replayed by
+    // the hub — re-fetch the map's own snapshot on every reconnect so a
+    // player never keeps showing territory they've actually lost (#111).
+    _reconnectSub = realtimeService.onReconnected.listen((_) {
+      _hexManager.loadUserOwnHexes().then((_) {
+        if (mounted) setState(() {});
+      });
+      _refreshViewportHexes();
+    });
     _realtimeSub = realtimeService.onHexChanges.listen((events) {
       final changed = _hexManager.applyRealtimeChanges(events);
       if (changed && mounted) setState(() {});
