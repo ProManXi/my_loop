@@ -266,7 +266,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         // after the ~1h token expiry fetches a fresh one instead of failing
         // auth silently (#102).
         await ref.read(territoryRealtimeProvider).connect(
-          tokenProvider: () => fb.FirebaseAuth.instance.currentUser?.getIdToken(),
+          tokenProvider: () async => await fb.FirebaseAuth.instance.currentUser?.getIdToken(),
           userId: existing.id,
         );
 
@@ -367,7 +367,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
         // Connect SignalR + hydrate slices
         await ref.read(territoryRealtimeProvider).connect(
-          tokenProvider: () => fb.FirebaseAuth.instance.currentUser?.getIdToken(),
+          tokenProvider: () async => await fb.FirebaseAuth.instance.currentUser?.getIdToken(),
           userId: user.id,
         );
         await hydrateAllSlices(ref);

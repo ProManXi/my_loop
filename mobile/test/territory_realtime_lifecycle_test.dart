@@ -100,6 +100,11 @@ void main() {
 
       expect(realtime.disconnectCalls, 0);
 
+      // ProfileScreen is taller than the 800x600 default test surface, so the
+      // button sits below the fold and a bare tap() silently misses it.
+      await tester.ensureVisible(find.text('Sign Out'));
+      await tester.pumpAndSettle();
+
       await tester.tap(find.text('Sign Out'));
       await tester.pumpAndSettle();
 
