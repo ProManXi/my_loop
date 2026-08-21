@@ -15,7 +15,7 @@
 /// nothing consumed it).
 library;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myloop/shared/services/api_service.dart';
@@ -73,6 +73,20 @@ ProviderContainer _containerWith(ApiService api, TerritoryRealtimeService realti
   return container;
 }
 
+/// Drives a real foreground transition on the shared binding.
+///
+/// Both `SchedulerBinding.handleAppLifecycleStateChanged` and
+/// `AppLifecycleListener.didChangeAppLifecycleState` ignore a dispatch that
+/// repeats the current state, and the listener additionally asserts that
+/// `resumed` is only ever entered from `null`/`inactive`/`detached`. Going
+/// via `inactive` is therefore the only sequence that actually fires
+/// `onResume` — dispatching `resumed` alone is silently a no-op.
+void _resumeApp() {
+  final binding = TestWidgetsFlutterBinding.instance;
+  binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+}
+
 void main() {
   // realtimeResyncProvider builds an AppLifecycleListener as soon as it's
   // read, even from a plain `test()` block that never pumps a widget — make
@@ -91,6 +105,7 @@ void main() {
       // No live hub connection needed — the extracted handler is what the
       // real `onreconnected` hub callback now delegates to.
       await service.handleReconnected(connectionId: 'conn-1');
+      await pumpEventQueue();
 
       expect(fireCount, 1);
     });
@@ -104,6 +119,7 @@ void main() {
       addTearDown(sub.cancel);
 
       await service.handleReconnected();
+      await pumpEventQueue();
 
       expect(fired, isTrue);
     });
@@ -127,7 +143,7 @@ void main() {
 
       await realtime.handleReconnected(connectionId: 'conn-1');
       // Let the async hydration triggered by the reconnect event complete.
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
 
       expect(
         container.read(missionsSliceProvider).missions.map((m) => m.id).toSet(),
@@ -138,7 +154,11 @@ void main() {
   });
 
   group('realtimeResyncProvider — app-foreground resync', () {
-    testWidgets('resuming the app while connected re-hydrates game state', (tester) async {
+    // The lifecycle state lives on the process-wide binding, so a previous
+    // test leaving it at `resumed` would make the next resume a no-op.
+    setUp(() => TestWidgetsFlutterBinding.instance.resetInternalState());
+
+    test('resuming the app while connected re-hydrates game state', () async {
       final realtime = _ControllableRealtime()..connectedOverride = true;
       addTearDown(realtime.dispose);
       final api = _FakeApi({
@@ -151,9 +171,8 @@ void main() {
       container.read(realtimeResyncProvider);
       expect(container.read(missionsSliceProvider).missions, isEmpty);
 
-      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pump();
-      await Future<void>.delayed(Duration.zero);
+      _resumeApp();
+      await pumpEventQueue();
 
       expect(
         container.read(missionsSliceProvider).missions.map((m) => m.id).toSet(),
@@ -161,7 +180,7 @@ void main() {
       );
     });
 
-    testWidgets('resuming the app while disconnected does not fetch', (tester) async {
+    test('resuming the app while disconnected does not fetch', () async {
       final realtime = _ControllableRealtime()..connectedOverride = false;
       addTearDown(realtime.dispose);
       final api = _FakeApi({
@@ -173,10 +192,11 @@ void main() {
 
       container.read(realtimeResyncProvider);
 
-      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pump();
-      await Future<void>.delayed(Duration.zero);
+      _resumeApp();
+      await pumpEventQueue();
 
+      expect(TestWidgetsFlutterBinding.instance.lifecycleState, AppLifecycleState.resumed,
+          reason: 'the resume must really have been delivered, or this asserts nothing');
       expect(container.read(missionsSliceProvider).missions, isEmpty,
           reason: 'no live connection means no snapshot to resync against');
     });
