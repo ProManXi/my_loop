@@ -345,7 +345,7 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
       const Duration(seconds: AppConstants.hexRefreshIntervalSeconds),
       (_) => _refreshViewportHexes(),
     );
-    _connectRealtime();
+    _subscribeRealtime();
   }
 
   @override
@@ -353,14 +353,20 @@ class _JourneyMapState extends ConsumerState<_JourneyMap> {
     _locationTimer?.cancel();
     _hexRefreshTimer?.cancel();
     _realtimeSub?.cancel();
-    ref.read(territoryRealtimeProvider).disconnect();
+    // Do NOT disconnect territoryRealtimeProvider here — the hub connection is
+    // app-lifecycle-scoped (connected at login, disconnected at logout), not
+    // scoped to this screen. Killing it here left the app deaf to live stats/
+    // XP/mission/achievement pushes for the rest of the session (#102).
     _mapController.dispose();
     super.dispose();
   }
 
-  void _connectRealtime() {
+  /// Subscribes to the already-connected shared hub's hex-change stream. Does
+  /// NOT call `connect()` — the connection is established once at login and
+  /// lives app-wide (see #102); this screen only listens and unsubscribes its
+  /// own listener on dispose.
+  void _subscribeRealtime() {
     final realtimeService = ref.read(territoryRealtimeProvider);
-    realtimeService.connect();
     _realtimeSub = realtimeService.onHexChanges.listen((events) {
       final changed = _hexManager.applyRealtimeChanges(events);
       if (changed && mounted) setState(() {});

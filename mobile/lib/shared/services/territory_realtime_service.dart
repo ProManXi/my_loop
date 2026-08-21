@@ -4,12 +4,17 @@
 /// - Public: hex ownership changes (region-scoped)
 /// - Personal: user stats, XP, missions, achievements (user-group-scoped)
 ///
-/// Connection lifecycle: connect once after login, stays alive until logout.
-/// Passes Firebase JWT via query string for authenticated personal events.
+/// Connection lifecycle: connect once after login, stays alive app-wide until
+/// logout (see #102) — it must not be torn down when any individual screen
+/// that merely listens to it (e.g. Journey) is disposed.
+/// Fetches a fresh Firebase JWT per (re)negotiation via `accessTokenFactory`
+/// for authenticated personal events, so a reconnect after token expiry
+/// re-authenticates instead of failing silently.
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 import 'package:signalr_netcore/signalr_client.dart';
@@ -146,7 +151,10 @@ class AchievementUnlockEvent {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Service that manages the SignalR connection to the territory hub.
-/// Singleton lifecycle: connect on login, disconnect on logout.
+///
+/// Singleton lifecycle: connect once after login/session-restore, stays alive
+/// app-wide (including across the Journey screen opening and closing — see
+/// #102) until logout, when it is explicitly disconnected.
 class TerritoryRealtimeService {
   final String _baseUrl;
   HubConnection? _hubConnection;
@@ -155,6 +163,7 @@ class TerritoryRealtimeService {
   final _xpController = StreamController<XpDelta>.broadcast();
   final _missionController = StreamController<MissionDelta>.broadcast();
   final _achievementController = StreamController<AchievementDelta>.broadcast();
+  final _reconnectedController = StreamController<void>.broadcast();
   final Set<String> _subscribedRegions = {};
   bool _isConnected = false;
   String? _userId;
@@ -168,58 +177,89 @@ class TerritoryRealtimeService {
   Stream<MissionDelta> get onMissions => _missionController.stream;
   Stream<AchievementDelta> get onAchievements => _achievementController.stream;
 
+  /// Fires after a dropped connection auto-reconnects and region/user groups
+  /// have been rejoined. Consumers that need a full snapshot re-fetch on
+  /// reconnect (missed deltas are otherwise lost — see #111) subscribe here.
+  Stream<void> get onReconnected => _reconnectedController.stream;
+
   bool get isConnected => _isConnected;
 
+  /// Number of connection attempts actually made (i.e. not short-circuited by
+  /// the already-connected guard). Exposed only so a regression test can prove
+  /// a failed [start] doesn't wedge future [connect] calls into a permanent
+  /// no-op (see #102).
+  @visibleForTesting
+  int connectAttempts = 0;
+
   /// Connect to the SignalR hub with optional authentication.
-  /// [token] — Firebase JWT for authenticated personal events.
+  /// [tokenProvider] — supplies a fresh Firebase JWT on each (re)negotiation
+  /// (rather than a single point-in-time string), so an automatic reconnect
+  /// after the ~1h token expiry re-authenticates instead of failing silently.
   /// [userId] — App user ID for joining personal group.
-  Future<void> connect({String? token, String? userId}) async {
+  Future<void> connect({
+    Future<String?> Function()? tokenProvider,
+    String? userId,
+  }) async {
     if (_hubConnection != null) return;
+    connectAttempts++;
 
     _userId = userId;
-    var hubUrl = '$_baseUrl/hubs/territory';
-    if (token != null && token.isNotEmpty) {
-      hubUrl += '?access_token=$token';
-    }
+    final hubUrl = '$_baseUrl/hubs/territory';
 
-    _hubConnection = HubConnectionBuilder()
-        .withUrl(hubUrl)
+    final connection = HubConnectionBuilder()
+        .withUrl(
+          hubUrl,
+          options: tokenProvider != null
+              ? HttpConnectionOptions(
+                  accessTokenFactory: () async => await tokenProvider() ?? '',
+                )
+              : null,
+        )
         .withAutomaticReconnect()
         .build();
+    _hubConnection = connection;
 
     // Public event
-    _hubConnection!.on('HexOwnershipChanged', _handleHexChanges);
+    connection.on('HexOwnershipChanged', _handleHexChanges);
 
     // Personal events
-    _hubConnection!.on('UserStatsDelta', _handleUserStats);
-    _hubConnection!.on('XpDelta', _handleXp);
-    _hubConnection!.on('MissionDelta', _handleMissions);
-    _hubConnection!.on('AchievementUnlocked', _handleAchievements);
+    connection.on('UserStatsDelta', _handleUserStats);
+    connection.on('XpDelta', _handleXp);
+    connection.on('MissionDelta', _handleMissions);
+    connection.on('AchievementUnlocked', _handleAchievements);
 
-    _hubConnection!.onclose(({error}) {
+    connection.onclose(({error}) {
       _isConnected = false;
       _log.warning('Connection closed: $error');
     });
 
-    _hubConnection!.onreconnected(({connectionId}) {
+    connection.onreconnected(({connectionId}) {
       _isConnected = true;
       _log.info('Reconnected: $connectionId');
-      _resubscribeAll();
+      _resubscribeAll().then((_) => _reconnectedController.add(null));
     });
 
     try {
-      await _hubConnection!.start();
+      await connection.start();
       _isConnected = true;
       _log.info('Connected to $hubUrl');
 
       // Join personal group if authenticated
       if (userId != null && userId.isNotEmpty) {
-        await _hubConnection!.invoke('JoinUserGroup', args: [userId]);
+        await connection.invoke('JoinUserGroup', args: [userId]);
         _log.fine('Joined user group: user_$userId');
       }
     } catch (e) {
-      _isConnected = false;
       _log.warning('Connection failed', e);
+      _isConnected = false;
+      // A previous run left `connect()` permanently wedged after a failed
+      // `start()`: `_hubConnection` stayed non-null, so every later call
+      // bailed on the guard above without ever retrying (#102). Null it out
+      // so the next connect() is a fresh attempt, not a silent no-op.
+      _hubConnection = null;
+      try {
+        await connection.stop();
+      } catch (_) {}
     }
   }
 
@@ -250,7 +290,8 @@ class TerritoryRealtimeService {
     }
   }
 
-  /// Disconnect and clean up.
+  /// Disconnect and clean up. Called on logout only — the connection is
+  /// app-lifecycle-scoped, not screen-scoped (see #102).
   Future<void> disconnect() async {
     if (_userId != null && _isConnected) {
       try {
@@ -271,6 +312,7 @@ class TerritoryRealtimeService {
     _xpController.close();
     _missionController.close();
     _achievementController.close();
+    _reconnectedController.close();
   }
 
   // ── Event handlers ──
